@@ -10,13 +10,55 @@ import type { ActorMethod } from '@icp-sdk/core/agent';
 import type { IDL } from '@icp-sdk/core/candid';
 import type { Principal } from '@icp-sdk/core/principal';
 
+export interface ActivityStats {
+  'unreadNotifications' : bigint,
+  'memoryEntries' : bigint,
+  'totalMessages' : bigint,
+  'completedReminders' : bigint,
+  'pendingReminders' : bigint,
+}
+export interface AssistantSettings {
+  'notificationsEnabled' : boolean,
+  'memoryTrackingEnabled' : boolean,
+  'tone' : ChatTone,
+  'assistantDisplayName' : string,
+}
 export interface ChatRequest { 'message' : string }
 export interface ChatResponse { 'message' : string, 'response' : string }
+export type ChatTone = { 'humorous' : null } |
+  { 'friendly' : null } |
+  { 'casual' : null } |
+  { 'formal' : null };
+export interface IntegrationStatus {
+  'files' : boolean,
+  'contacts' : boolean,
+  'messages' : boolean,
+  'email' : boolean,
+  'calendar' : boolean,
+  'camera' : boolean,
+}
 export interface MemoryEntry { 'key' : string, 'value' : string }
 export interface Message {
   'content' : string,
   'role' : string,
   'timestamp' : Timestamp,
+}
+export interface Notification {
+  'id' : bigint,
+  'content' : string,
+  'source' : NotificationSource,
+  'suggestion' : string,
+  'dismissed' : boolean,
+}
+export type NotificationSource = { 'email' : null } |
+  { 'calendar' : null } |
+  { 'message' : null };
+export interface Reminder {
+  'id' : bigint,
+  'title' : string,
+  'note' : string,
+  'completed' : boolean,
+  'dueTime' : Timestamp,
 }
 export type Timestamp = bigint;
 export interface UserProfile { 'username' : string, 'email' : string }
@@ -28,15 +70,27 @@ export interface _SERVICE {
   'assignCallerUserRole' : ActorMethod<[Principal, UserRole], undefined>,
   'chat' : ActorMethod<[ChatRequest], ChatResponse>,
   'clearChatHistory' : ActorMethod<[], undefined>,
+  'completeReminder' : ActorMethod<[bigint], undefined>,
+  'createReminder' : ActorMethod<[string, string, Timestamp], bigint>,
   'deleteMemoryEntry' : ActorMethod<[string], undefined>,
+  'deleteReminder' : ActorMethod<[bigint], undefined>,
+  'dismissNotification' : ActorMethod<[bigint], undefined>,
+  'getActivityStats' : ActorMethod<[], ActivityStats>,
   'getAllMemoryEntries' : ActorMethod<[], Array<MemoryEntry>>,
   'getCallerUserProfile' : ActorMethod<[], [] | [UserProfile]>,
   'getCallerUserRole' : ActorMethod<[], UserRole>,
   'getChatHistory' : ActorMethod<[], Array<Message>>,
+  'getIntegrationStatus' : ActorMethod<[], IntegrationStatus>,
+  'getNotifications' : ActorMethod<[], Array<Notification>>,
+  'getReminders' : ActorMethod<[], Array<Reminder>>,
+  'getSettings' : ActorMethod<[], AssistantSettings>,
   'getUserProfile' : ActorMethod<[Principal], [] | [UserProfile]>,
   'isCallerAdmin' : ActorMethod<[], boolean>,
   'saveCallerUserProfile' : ActorMethod<[UserProfile], undefined>,
+  'seedMockNotifications' : ActorMethod<[], undefined>,
+  'setIntegrationStatus' : ActorMethod<[string, boolean], undefined>,
   'updateMemoryEntry' : ActorMethod<[string, string], undefined>,
+  'updateSettings' : ActorMethod<[AssistantSettings], undefined>,
 }
 export declare const idlService: IDL.ServiceClass;
 export declare const idlInitArgs: IDL.Type[];

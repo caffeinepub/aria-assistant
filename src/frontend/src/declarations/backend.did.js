@@ -18,16 +18,62 @@ export const ChatResponse = IDL.Record({
   'message' : IDL.Text,
   'response' : IDL.Text,
 });
+export const Timestamp = IDL.Int;
+export const ActivityStats = IDL.Record({
+  'unreadNotifications' : IDL.Nat,
+  'memoryEntries' : IDL.Nat,
+  'totalMessages' : IDL.Nat,
+  'completedReminders' : IDL.Nat,
+  'pendingReminders' : IDL.Nat,
+});
 export const MemoryEntry = IDL.Record({ 'key' : IDL.Text, 'value' : IDL.Text });
 export const UserProfile = IDL.Record({
   'username' : IDL.Text,
   'email' : IDL.Text,
 });
-export const Timestamp = IDL.Int;
 export const Message = IDL.Record({
   'content' : IDL.Text,
   'role' : IDL.Text,
   'timestamp' : Timestamp,
+});
+export const IntegrationStatus = IDL.Record({
+  'files' : IDL.Bool,
+  'contacts' : IDL.Bool,
+  'messages' : IDL.Bool,
+  'email' : IDL.Bool,
+  'calendar' : IDL.Bool,
+  'camera' : IDL.Bool,
+});
+export const NotificationSource = IDL.Variant({
+  'email' : IDL.Null,
+  'calendar' : IDL.Null,
+  'message' : IDL.Null,
+});
+export const Notification = IDL.Record({
+  'id' : IDL.Nat,
+  'content' : IDL.Text,
+  'source' : NotificationSource,
+  'suggestion' : IDL.Text,
+  'dismissed' : IDL.Bool,
+});
+export const Reminder = IDL.Record({
+  'id' : IDL.Nat,
+  'title' : IDL.Text,
+  'note' : IDL.Text,
+  'completed' : IDL.Bool,
+  'dueTime' : Timestamp,
+});
+export const ChatTone = IDL.Variant({
+  'humorous' : IDL.Null,
+  'friendly' : IDL.Null,
+  'casual' : IDL.Null,
+  'formal' : IDL.Null,
+});
+export const AssistantSettings = IDL.Record({
+  'notificationsEnabled' : IDL.Bool,
+  'memoryTrackingEnabled' : IDL.Bool,
+  'tone' : ChatTone,
+  'assistantDisplayName' : IDL.Text,
 });
 
 export const idlService = IDL.Service({
@@ -35,11 +81,20 @@ export const idlService = IDL.Service({
   'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
   'chat' : IDL.Func([ChatRequest], [ChatResponse], []),
   'clearChatHistory' : IDL.Func([], [], []),
+  'completeReminder' : IDL.Func([IDL.Nat], [], []),
+  'createReminder' : IDL.Func([IDL.Text, IDL.Text, Timestamp], [IDL.Nat], []),
   'deleteMemoryEntry' : IDL.Func([IDL.Text], [], []),
+  'deleteReminder' : IDL.Func([IDL.Nat], [], []),
+  'dismissNotification' : IDL.Func([IDL.Nat], [], []),
+  'getActivityStats' : IDL.Func([], [ActivityStats], ['query']),
   'getAllMemoryEntries' : IDL.Func([], [IDL.Vec(MemoryEntry)], ['query']),
   'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
   'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
   'getChatHistory' : IDL.Func([], [IDL.Vec(Message)], ['query']),
+  'getIntegrationStatus' : IDL.Func([], [IntegrationStatus], ['query']),
+  'getNotifications' : IDL.Func([], [IDL.Vec(Notification)], ['query']),
+  'getReminders' : IDL.Func([], [IDL.Vec(Reminder)], ['query']),
+  'getSettings' : IDL.Func([], [AssistantSettings], ['query']),
   'getUserProfile' : IDL.Func(
       [IDL.Principal],
       [IDL.Opt(UserProfile)],
@@ -47,7 +102,10 @@ export const idlService = IDL.Service({
     ),
   'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
   'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+  'seedMockNotifications' : IDL.Func([], [], []),
+  'setIntegrationStatus' : IDL.Func([IDL.Text, IDL.Bool], [], []),
   'updateMemoryEntry' : IDL.Func([IDL.Text, IDL.Text], [], []),
+  'updateSettings' : IDL.Func([AssistantSettings], [], []),
 });
 
 export const idlInitArgs = [];
@@ -63,13 +121,59 @@ export const idlFactory = ({ IDL }) => {
     'message' : IDL.Text,
     'response' : IDL.Text,
   });
+  const Timestamp = IDL.Int;
+  const ActivityStats = IDL.Record({
+    'unreadNotifications' : IDL.Nat,
+    'memoryEntries' : IDL.Nat,
+    'totalMessages' : IDL.Nat,
+    'completedReminders' : IDL.Nat,
+    'pendingReminders' : IDL.Nat,
+  });
   const MemoryEntry = IDL.Record({ 'key' : IDL.Text, 'value' : IDL.Text });
   const UserProfile = IDL.Record({ 'username' : IDL.Text, 'email' : IDL.Text });
-  const Timestamp = IDL.Int;
   const Message = IDL.Record({
     'content' : IDL.Text,
     'role' : IDL.Text,
     'timestamp' : Timestamp,
+  });
+  const IntegrationStatus = IDL.Record({
+    'files' : IDL.Bool,
+    'contacts' : IDL.Bool,
+    'messages' : IDL.Bool,
+    'email' : IDL.Bool,
+    'calendar' : IDL.Bool,
+    'camera' : IDL.Bool,
+  });
+  const NotificationSource = IDL.Variant({
+    'email' : IDL.Null,
+    'calendar' : IDL.Null,
+    'message' : IDL.Null,
+  });
+  const Notification = IDL.Record({
+    'id' : IDL.Nat,
+    'content' : IDL.Text,
+    'source' : NotificationSource,
+    'suggestion' : IDL.Text,
+    'dismissed' : IDL.Bool,
+  });
+  const Reminder = IDL.Record({
+    'id' : IDL.Nat,
+    'title' : IDL.Text,
+    'note' : IDL.Text,
+    'completed' : IDL.Bool,
+    'dueTime' : Timestamp,
+  });
+  const ChatTone = IDL.Variant({
+    'humorous' : IDL.Null,
+    'friendly' : IDL.Null,
+    'casual' : IDL.Null,
+    'formal' : IDL.Null,
+  });
+  const AssistantSettings = IDL.Record({
+    'notificationsEnabled' : IDL.Bool,
+    'memoryTrackingEnabled' : IDL.Bool,
+    'tone' : ChatTone,
+    'assistantDisplayName' : IDL.Text,
   });
   
   return IDL.Service({
@@ -77,11 +181,20 @@ export const idlFactory = ({ IDL }) => {
     'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
     'chat' : IDL.Func([ChatRequest], [ChatResponse], []),
     'clearChatHistory' : IDL.Func([], [], []),
+    'completeReminder' : IDL.Func([IDL.Nat], [], []),
+    'createReminder' : IDL.Func([IDL.Text, IDL.Text, Timestamp], [IDL.Nat], []),
     'deleteMemoryEntry' : IDL.Func([IDL.Text], [], []),
+    'deleteReminder' : IDL.Func([IDL.Nat], [], []),
+    'dismissNotification' : IDL.Func([IDL.Nat], [], []),
+    'getActivityStats' : IDL.Func([], [ActivityStats], ['query']),
     'getAllMemoryEntries' : IDL.Func([], [IDL.Vec(MemoryEntry)], ['query']),
     'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
     'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
     'getChatHistory' : IDL.Func([], [IDL.Vec(Message)], ['query']),
+    'getIntegrationStatus' : IDL.Func([], [IntegrationStatus], ['query']),
+    'getNotifications' : IDL.Func([], [IDL.Vec(Notification)], ['query']),
+    'getReminders' : IDL.Func([], [IDL.Vec(Reminder)], ['query']),
+    'getSettings' : IDL.Func([], [AssistantSettings], ['query']),
     'getUserProfile' : IDL.Func(
         [IDL.Principal],
         [IDL.Opt(UserProfile)],
@@ -89,7 +202,10 @@ export const idlFactory = ({ IDL }) => {
       ),
     'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
     'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+    'seedMockNotifications' : IDL.Func([], [], []),
+    'setIntegrationStatus' : IDL.Func([IDL.Text, IDL.Bool], [], []),
     'updateMemoryEntry' : IDL.Func([IDL.Text, IDL.Text], [], []),
+    'updateSettings' : IDL.Func([AssistantSettings], [], []),
   });
 };
 

@@ -169,10 +169,15 @@
   0%, 100% { opacity: 1; box-shadow: 0 0 6px oklch(0.72 0.2 145 / 0.8); }
   50% { opacity: 0.5; box-shadow: 0 0 12px oklch(0.72 0.2 145 / 0.4); }
 }
+@keyframes pulse-red {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px oklch(0.62 0.22 22 / 0.9); }
+  50% { opacity: 0.6; box-shadow: 0 0 14px oklch(0.62 0.22 22 / 0.5); }
+}
 
 .pulse-idle { animation: pulse-cyan 2s ease-in-out infinite; }
 .pulse-thinking { animation: pulse-amber 0.8s ease-in-out infinite; }
 .pulse-responding { animation: pulse-green 0.5s ease-in-out infinite; }
+.pulse-alert { animation: pulse-red 0.6s ease-in-out infinite; }
 
 /* ─── Scanline overlay ─── */
 .scanlines::after {
@@ -267,3 +272,53 @@
   50% { transform: scale(1.05); box-shadow: 0 0 0 8px oklch(0.62 0.22 22 / 0); }
 }
 .recording { animation: recording-pulse 1s ease-in-out infinite; }
+
+/* ─── Expression ring animations ─── */
+@keyframes expr-alert-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 2px oklch(0.62 0.22 22 / 0.8), 0 0 20px oklch(0.62 0.22 22 / 0.5); }
+  50% { opacity: 0.7; box-shadow: 0 0 0 2px oklch(0.62 0.22 22 / 0.4), 0 0 30px oklch(0.62 0.22 22 / 0.3); }
+}
+@keyframes expr-thinking-flicker {
+  0%, 90%, 100% { opacity: 1; box-shadow: 0 0 0 2px oklch(0.85 0.18 75 / 0.7), 0 0 15px oklch(0.85 0.18 75 / 0.4); }
+  95% { opacity: 0.6; }
+}
+@keyframes expr-responding-breathe {
+  0%, 100% { box-shadow: 0 0 0 2px oklch(0.72 0.2 145 / 0.6), 0 0 15px oklch(0.72 0.2 145 / 0.3); }
+  50% { box-shadow: 0 0 0 3px oklch(0.72 0.2 145 / 0.9), 0 0 25px oklch(0.72 0.2 145 / 0.5); }
+}
+@keyframes expr-idle-glow {
+  0%, 100% { box-shadow: 0 0 0 1px oklch(0.82 0.18 195 / 0.4), 0 0 12px oklch(0.82 0.18 195 / 0.2); }
+  50% { box-shadow: 0 0 0 2px oklch(0.82 0.18 195 / 0.6), 0 0 20px oklch(0.82 0.18 195 / 0.3); }
+}
+.expr-idle { animation: expr-idle-glow 3s ease-in-out infinite; }
+.expr-thinking { animation: expr-thinking-flicker 1s ease-in-out infinite; }
+.expr-responding { animation: expr-responding-breathe 0.8s ease-in-out infinite; }
+.expr-alert { animation: expr-alert-pulse 0.6s ease-in-out infinite; }
+
+/* ─── Notification advisor panel ─── */
+.notification-panel-header {
+  background: linear-gradient(135deg, oklch(0.13 0.025 260 / 0.95), oklch(0.11 0.02 265 / 0.9));
+  border: 1px solid oklch(0.82 0.18 195 / 0.2);
+}
+
+/* ─── Integration card ─── */
+.integration-card-connected {
+  border: 1px solid oklch(0.82 0.18 195 / 0.5);
+  box-shadow: 0 0 12px oklch(0.82 0.18 195 / 0.15), inset 0 0 20px oklch(0.82 0.18 195 / 0.04);
+}
+.integration-card-disconnected {
+  border: 1px solid oklch(0.82 0.18 195 / 0.12);
+}
+
+/* ─── Sidebar tabs override ─── */
+.sidebar-tabs [data-state="active"] {
+  background: oklch(0.82 0.18 195 / 0.12);
+  color: oklch(0.82 0.18 195);
+  border-bottom: 1px solid oklch(0.82 0.18 195 / 0.5);
+}
+.sidebar-tabs [data-radix-collection-item] {
+  font-family: "Geist Mono", monospace;
+  font-size: 0.6rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}

@@ -89,26 +89,72 @@ export class ExternalBlob {
         return this;
     }
 }
+export interface ActivityStats {
+    unreadNotifications: bigint;
+    memoryEntries: bigint;
+    totalMessages: bigint;
+    completedReminders: bigint;
+    pendingReminders: bigint;
+}
 export type Timestamp = bigint;
+export interface MemoryEntry {
+    key: string;
+    value: string;
+}
+export interface AssistantSettings {
+    notificationsEnabled: boolean;
+    memoryTrackingEnabled: boolean;
+    tone: ChatTone;
+    assistantDisplayName: string;
+}
+export interface Reminder {
+    id: bigint;
+    title: string;
+    note: string;
+    completed: boolean;
+    dueTime: Timestamp;
+}
 export interface ChatResponse {
     message: string;
     response: string;
 }
-export interface ChatRequest {
-    message: string;
+export interface Notification {
+    id: bigint;
+    content: string;
+    source: NotificationSource;
+    suggestion: string;
+    dismissed: boolean;
 }
 export interface Message {
     content: string;
     role: string;
     timestamp: Timestamp;
 }
-export interface MemoryEntry {
-    key: string;
-    value: string;
+export interface IntegrationStatus {
+    files: boolean;
+    contacts: boolean;
+    messages: boolean;
+    email: boolean;
+    calendar: boolean;
+    camera: boolean;
+}
+export interface ChatRequest {
+    message: string;
 }
 export interface UserProfile {
     username: string;
     email: string;
+}
+export enum ChatTone {
+    humorous = "humorous",
+    friendly = "friendly",
+    casual = "casual",
+    formal = "formal"
+}
+export enum NotificationSource {
+    email = "email",
+    calendar = "calendar",
+    message = "message"
 }
 export enum UserRole {
     admin = "admin",
@@ -120,17 +166,29 @@ export interface backendInterface {
     assignCallerUserRole(user: Principal, role: UserRole): Promise<void>;
     chat(request: ChatRequest): Promise<ChatResponse>;
     clearChatHistory(): Promise<void>;
+    completeReminder(id: bigint): Promise<void>;
+    createReminder(title: string, note: string, dueTime: Timestamp): Promise<bigint>;
     deleteMemoryEntry(key: string): Promise<void>;
+    deleteReminder(id: bigint): Promise<void>;
+    dismissNotification(id: bigint): Promise<void>;
+    getActivityStats(): Promise<ActivityStats>;
     getAllMemoryEntries(): Promise<Array<MemoryEntry>>;
     getCallerUserProfile(): Promise<UserProfile | null>;
     getCallerUserRole(): Promise<UserRole>;
     getChatHistory(): Promise<Array<Message>>;
+    getIntegrationStatus(): Promise<IntegrationStatus>;
+    getNotifications(): Promise<Array<Notification>>;
+    getReminders(): Promise<Array<Reminder>>;
+    getSettings(): Promise<AssistantSettings>;
     getUserProfile(user: Principal): Promise<UserProfile | null>;
     isCallerAdmin(): Promise<boolean>;
     saveCallerUserProfile(profile: UserProfile): Promise<void>;
+    seedMockNotifications(): Promise<void>;
+    setIntegrationStatus(integration: string, enabled: boolean): Promise<void>;
     updateMemoryEntry(key: string, value: string): Promise<void>;
+    updateSettings(newSettings: AssistantSettings): Promise<void>;
 }
-import type { UserProfile as _UserProfile, UserRole as _UserRole } from "./declarations/backend.did.d.ts";
+import type { AssistantSettings as _AssistantSettings, ChatTone as _ChatTone, Notification as _Notification, NotificationSource as _NotificationSource, UserProfile as _UserProfile, UserRole as _UserRole } from "./declarations/backend.did.d.ts";
 export class Backend implements backendInterface {
     constructor(private actor: ActorSubclass<_SERVICE>, private _uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, private _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, private processError?: (error: unknown) => never){}
     async _initializeAccessControlWithSecret(arg0: string): Promise<void> {
@@ -189,6 +247,34 @@ export class Backend implements backendInterface {
             return result;
         }
     }
+    async completeReminder(arg0: bigint): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.completeReminder(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.completeReminder(arg0);
+            return result;
+        }
+    }
+    async createReminder(arg0: string, arg1: string, arg2: Timestamp): Promise<bigint> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.createReminder(arg0, arg1, arg2);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.createReminder(arg0, arg1, arg2);
+            return result;
+        }
+    }
     async deleteMemoryEntry(arg0: string): Promise<void> {
         if (this.processError) {
             try {
@@ -200,6 +286,48 @@ export class Backend implements backendInterface {
             }
         } else {
             const result = await this.actor.deleteMemoryEntry(arg0);
+            return result;
+        }
+    }
+    async deleteReminder(arg0: bigint): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.deleteReminder(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.deleteReminder(arg0);
+            return result;
+        }
+    }
+    async dismissNotification(arg0: bigint): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.dismissNotification(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.dismissNotification(arg0);
+            return result;
+        }
+    }
+    async getActivityStats(): Promise<ActivityStats> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getActivityStats();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getActivityStats();
             return result;
         }
     }
@@ -259,6 +387,62 @@ export class Backend implements backendInterface {
             return result;
         }
     }
+    async getIntegrationStatus(): Promise<IntegrationStatus> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getIntegrationStatus();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getIntegrationStatus();
+            return result;
+        }
+    }
+    async getNotifications(): Promise<Array<Notification>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getNotifications();
+                return from_candid_vec_n6(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getNotifications();
+            return from_candid_vec_n6(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async getReminders(): Promise<Array<Reminder>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getReminders();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getReminders();
+            return result;
+        }
+    }
+    async getSettings(): Promise<AssistantSettings> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getSettings();
+                return from_candid_AssistantSettings_n11(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getSettings();
+            return from_candid_AssistantSettings_n11(this._uploadFile, this._downloadFile, result);
+        }
+    }
     async getUserProfile(arg0: Principal): Promise<UserProfile | null> {
         if (this.processError) {
             try {
@@ -301,6 +485,34 @@ export class Backend implements backendInterface {
             return result;
         }
     }
+    async seedMockNotifications(): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.seedMockNotifications();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.seedMockNotifications();
+            return result;
+        }
+    }
+    async setIntegrationStatus(arg0: string, arg1: boolean): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.setIntegrationStatus(arg0, arg1);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.setIntegrationStatus(arg0, arg1);
+            return result;
+        }
+    }
     async updateMemoryEntry(arg0: string, arg1: string): Promise<void> {
         if (this.processError) {
             try {
@@ -315,12 +527,97 @@ export class Backend implements backendInterface {
             return result;
         }
     }
+    async updateSettings(arg0: AssistantSettings): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.updateSettings(to_candid_AssistantSettings_n15(this._uploadFile, this._downloadFile, arg0));
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.updateSettings(to_candid_AssistantSettings_n15(this._uploadFile, this._downloadFile, arg0));
+            return result;
+        }
+    }
+}
+function from_candid_AssistantSettings_n11(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _AssistantSettings): AssistantSettings {
+    return from_candid_record_n12(_uploadFile, _downloadFile, value);
+}
+function from_candid_ChatTone_n13(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _ChatTone): ChatTone {
+    return from_candid_variant_n14(_uploadFile, _downloadFile, value);
+}
+function from_candid_NotificationSource_n9(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _NotificationSource): NotificationSource {
+    return from_candid_variant_n10(_uploadFile, _downloadFile, value);
+}
+function from_candid_Notification_n7(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _Notification): Notification {
+    return from_candid_record_n8(_uploadFile, _downloadFile, value);
 }
 function from_candid_UserRole_n4(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _UserRole): UserRole {
     return from_candid_variant_n5(_uploadFile, _downloadFile, value);
 }
 function from_candid_opt_n3(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_UserProfile]): UserProfile | null {
     return value.length === 0 ? null : value[0];
+}
+function from_candid_record_n12(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    notificationsEnabled: boolean;
+    memoryTrackingEnabled: boolean;
+    tone: _ChatTone;
+    assistantDisplayName: string;
+}): {
+    notificationsEnabled: boolean;
+    memoryTrackingEnabled: boolean;
+    tone: ChatTone;
+    assistantDisplayName: string;
+} {
+    return {
+        notificationsEnabled: value.notificationsEnabled,
+        memoryTrackingEnabled: value.memoryTrackingEnabled,
+        tone: from_candid_ChatTone_n13(_uploadFile, _downloadFile, value.tone),
+        assistantDisplayName: value.assistantDisplayName
+    };
+}
+function from_candid_record_n8(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    id: bigint;
+    content: string;
+    source: _NotificationSource;
+    suggestion: string;
+    dismissed: boolean;
+}): {
+    id: bigint;
+    content: string;
+    source: NotificationSource;
+    suggestion: string;
+    dismissed: boolean;
+} {
+    return {
+        id: value.id,
+        content: value.content,
+        source: from_candid_NotificationSource_n9(_uploadFile, _downloadFile, value.source),
+        suggestion: value.suggestion,
+        dismissed: value.dismissed
+    };
+}
+function from_candid_variant_n10(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    email: null;
+} | {
+    calendar: null;
+} | {
+    message: null;
+}): NotificationSource {
+    return "email" in value ? NotificationSource.email : "calendar" in value ? NotificationSource.calendar : "message" in value ? NotificationSource.message : value;
+}
+function from_candid_variant_n14(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    humorous: null;
+} | {
+    friendly: null;
+} | {
+    casual: null;
+} | {
+    formal: null;
+}): ChatTone {
+    return "humorous" in value ? ChatTone.humorous : "friendly" in value ? ChatTone.friendly : "casual" in value ? ChatTone.casual : "formal" in value ? ChatTone.formal : value;
 }
 function from_candid_variant_n5(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
     admin: null;
@@ -331,8 +628,54 @@ function from_candid_variant_n5(_uploadFile: (file: ExternalBlob) => Promise<Uin
 }): UserRole {
     return "admin" in value ? UserRole.admin : "user" in value ? UserRole.user : "guest" in value ? UserRole.guest : value;
 }
+function from_candid_vec_n6(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: Array<_Notification>): Array<Notification> {
+    return value.map((x)=>from_candid_Notification_n7(_uploadFile, _downloadFile, x));
+}
+function to_candid_AssistantSettings_n15(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: AssistantSettings): _AssistantSettings {
+    return to_candid_record_n16(_uploadFile, _downloadFile, value);
+}
+function to_candid_ChatTone_n17(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: ChatTone): _ChatTone {
+    return to_candid_variant_n18(_uploadFile, _downloadFile, value);
+}
 function to_candid_UserRole_n1(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: UserRole): _UserRole {
     return to_candid_variant_n2(_uploadFile, _downloadFile, value);
+}
+function to_candid_record_n16(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    notificationsEnabled: boolean;
+    memoryTrackingEnabled: boolean;
+    tone: ChatTone;
+    assistantDisplayName: string;
+}): {
+    notificationsEnabled: boolean;
+    memoryTrackingEnabled: boolean;
+    tone: _ChatTone;
+    assistantDisplayName: string;
+} {
+    return {
+        notificationsEnabled: value.notificationsEnabled,
+        memoryTrackingEnabled: value.memoryTrackingEnabled,
+        tone: to_candid_ChatTone_n17(_uploadFile, _downloadFile, value.tone),
+        assistantDisplayName: value.assistantDisplayName
+    };
+}
+function to_candid_variant_n18(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: ChatTone): {
+    humorous: null;
+} | {
+    friendly: null;
+} | {
+    casual: null;
+} | {
+    formal: null;
+} {
+    return value == ChatTone.humorous ? {
+        humorous: null
+    } : value == ChatTone.friendly ? {
+        friendly: null
+    } : value == ChatTone.casual ? {
+        casual: null
+    } : value == ChatTone.formal ? {
+        formal: null
+    } : value;
 }
 function to_candid_variant_n2(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: UserRole): {
     admin: null;

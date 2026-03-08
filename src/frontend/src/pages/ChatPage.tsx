@@ -12,22 +12,37 @@ import {
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import { LogOut, Mic, MicOff, Send, StopCircle, Trash2 } from "lucide-react";
+import {
+  LogOut,
+  Mic,
+  MicOff,
+  Send,
+  StopCircle,
+  Trash2,
+  Volume2,
+  VolumeX,
+  X,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import MemoryPanel from "../components/MemoryPanel";
+import NotificationAdvisor from "../components/NotificationAdvisor";
+import SettingsSheet from "../components/SettingsSheet";
+import SidebarTabs from "../components/SidebarTabs";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import {
+  useAssistantSettings,
   useChatHistory,
   useClearChat,
   useMemoryEntries,
+  useNotifications,
+  useReminders,
   useSaveUserProfile,
   useSendMessage,
   useUserProfile,
 } from "../hooks/useQueries";
 
-type MelinaStatus = "idle" | "thinking" | "responding";
+type MelinaStatus = "idle" | "thinking" | "responding" | "alert";
 
 type LocalMessage = {
   id: string;
@@ -36,6 +51,7 @@ type LocalMessage = {
   timestamp: number;
   audioUrl?: string;
   isVoiceNote?: boolean;
+  pendingSend?: boolean;
 };
 
 function formatTime(ts: number | bigint): string {
@@ -44,7 +60,10 @@ function formatTime(ts: number | bigint): string {
 }
 
 function StatusDot({ status }: { status: MelinaStatus }) {
-  const config = {
+  const config: Record<
+    MelinaStatus,
+    { dot: string; label: string; color: string }
+  > = {
     idle: {
       dot: "pulse-idle bg-cyan",
       label: "IDLE",
@@ -60,18 +79,35 @@ function StatusDot({ status }: { status: MelinaStatus }) {
       label: "RESPONDING",
       color: "text-green-400/80",
     },
-  }[status];
+    alert: {
+      dot: "bg-destructive pulse-alert",
+      label: "ALERT",
+      color: "text-destructive/80",
+    },
+  };
+
+  const cfg = config[status];
 
   return (
     <div className="flex items-center gap-1.5">
-      <span className={`w-2 h-2 rounded-full ${config.dot}`} />
+      <span className={`w-2 h-2 rounded-full ${cfg.dot}`} />
       <span
-        className={`font-mono text-[9px] tracking-[0.3em] uppercase ${config.color}`}
+        className={`font-mono text-[9px] tracking-[0.3em] uppercase ${cfg.color}`}
       >
-        {config.label}
+        {cfg.label}
       </span>
     </div>
   );
+}
+
+function getExpressionClass(status: MelinaStatus): string {
+  const map: Record<MelinaStatus, string> = {
+    idle: "expr-idle",
+    thinking: "expr-thinking",
+    responding: "expr-responding",
+    alert: "expr-alert",
+  };
+  return map[status];
 }
 
 export default function ChatPage() {
@@ -80,6 +116,9 @@ export default function ChatPage() {
     useChatHistory();
   const { data: memoryEntries = [] } = useMemoryEntries();
   const { data: userProfile } = useUserProfile();
+  const { data: notifications = [] } = useNotifications();
+  const { data: reminders = [] } = useReminders();
+  const { data: assistantSettings } = useAssistantSettings();
   const saveProfile = useSaveUserProfile();
   const sendMessage = useSendMessage();
   const clearChat = useClearChat();
@@ -91,10 +130,21 @@ export default function ChatPage() {
   const [showWelcome, setShowWelcome] = useState(true);
   const [profileSaved, setProfileSaved] = useState(false);
 
+  // TTS state
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const hasTTS = typeof window !== "undefined" && "speechSynthesis" in window;
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const reminderInjectedRef = useRef(false);
+  const alertShownRef = useRef(false);
+
+  // Derived unread count and display status
+  const unreadCount = notifications.filter((n) => !n.dismissed).length;
+  const displayStatus: MelinaStatus =
+    status === "idle" && unreadCount > 0 ? "alert" : status;
 
   // Save pending profile from registration
   useEffect(() => {
@@ -135,13 +185,59 @@ export default function ChatPage() {
     }
   }, [chatHistory, localMessages.length]);
 
+  // Proactive reminder injection (once per session)
+  useEffect(() => {
+    if (reminderInjectedRef.current) return;
+    if (historyLoading) return;
+    if (reminders.length === 0) return;
+
+    const now = Date.now();
+    const next24hNs = BigInt(now + 24 * 60 * 60 * 1000) * 1_000_000n;
+    const upcoming = reminders.filter(
+      (r) => !r.completed && r.dueTime <= next24hNs,
+    );
+
+    if (upcoming.length > 0) {
+      reminderInjectedRef.current = true;
+      const first = upcoming.sort((a, b) =>
+        a.dueTime < b.dueTime ? -1 : 1,
+      )[0];
+      const injected: LocalMessage = {
+        id: `proactive-reminder-${Date.now()}`,
+        role: "assistant",
+        content: `You have ${upcoming.length} reminder${upcoming.length > 1 ? "s" : ""} coming up soon. Your next one: "${first.title}". Would you like me to help prepare?`,
+        timestamp: Date.now(),
+      };
+      setLocalMessages((prev) => {
+        if (prev.length > 0 && prev[0].id.startsWith("proactive-reminder")) {
+          return prev;
+        }
+        return [injected, ...prev];
+      });
+    }
+  }, [reminders, historyLoading]);
+
+  // Alert status flash when unread notifications appear
+  useEffect(() => {
+    if (alertShownRef.current) return;
+    if (
+      unreadCount > 0 &&
+      (assistantSettings?.notificationsEnabled ?? true) &&
+      status === "idle"
+    ) {
+      alertShownRef.current = true;
+      setStatus("alert" as MelinaStatus);
+      setTimeout(() => setStatus("idle"), 3000);
+    }
+  }, [unreadCount, assistantSettings?.notificationsEnabled, status]);
+
   // Hide welcome overlay after 3.5s
   useEffect(() => {
     const t = setTimeout(() => setShowWelcome(false), 3500);
     return () => clearTimeout(t);
   }, []);
 
-  // Auto-scroll helper — called imperatively after message updates
+  // Auto-scroll helper
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
       if (scrollRef.current) {
@@ -156,8 +252,9 @@ export default function ChatPage() {
       (e) => e.key.toLowerCase() === "name",
     );
     const name = nameMemory?.value || userProfile?.username || "there";
-    return `Hello, ${name}. I'm Melina — your personal ARIA companion. I'm ready to assist you. What can I help you with today?`;
-  }, [memoryEntries, userProfile]);
+    const displayName = assistantSettings?.assistantDisplayName || "Melina";
+    return `Hello, ${name}. I'm ${displayName} — your personal ARIA companion. I'm ready to assist you. What can I help you with today?`;
+  }, [memoryEntries, userProfile, assistantSettings]);
 
   const handleSend = async (text?: string) => {
     const msg = (text ?? inputText).trim();
@@ -224,15 +321,15 @@ export default function ChatPage() {
         const voiceMsg: LocalMessage = {
           id: `vn-${Date.now()}`,
           role: "user",
-          content: "[Voice Note]",
+          content: "[Voice note recorded]",
           timestamp: Date.now(),
           audioUrl: url,
           isVoiceNote: true,
+          pendingSend: true,
         };
         setLocalMessages((prev) => [...prev, voiceMsg]);
         scrollToBottom();
 
-        // Clean up stream tracks
         for (const t of stream.getTracks()) t.stop();
       };
 
@@ -258,6 +355,44 @@ export default function ChatPage() {
     }
   };
 
+  // TTS helpers
+  const speak = (id: string, text: string) => {
+    if (!hasTTS) return;
+    window.speechSynthesis.cancel();
+    if (speakingId === id) {
+      setSpeakingId(null);
+      return;
+    }
+    const utt = new SpeechSynthesisUtterance(text);
+    utt.rate = 0.95;
+    utt.pitch = 1.1;
+    utt.onend = () => setSpeakingId(null);
+    utt.onerror = () => setSpeakingId(null);
+    setSpeakingId(id);
+    window.speechSynthesis.speak(utt);
+  };
+
+  const stopSpeaking = () => {
+    if (hasTTS) window.speechSynthesis.cancel();
+    setSpeakingId(null);
+  };
+
+  // Voice note dismiss
+  const dismissVoiceNote = (id: string) => {
+    if (speakingId) stopSpeaking();
+    setLocalMessages((prev) => prev.filter((m) => m.id !== id));
+  };
+
+  // Send voice note to Melina
+  const sendVoiceNote = (id: string) => {
+    setLocalMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, pendingSend: false } : m)),
+    );
+    void handleSend(
+      "[Voice note received — please respond to my voice message]",
+    );
+  };
+
   const allMessages = localMessages;
 
   return (
@@ -277,7 +412,7 @@ export default function ChatPage() {
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ delay: 0.2, duration: 0.5 }}
-                className="w-32 h-32 mx-auto rounded-full overflow-hidden border-2 border-primary/50 avatar-glow"
+                className={`w-32 h-32 mx-auto rounded-full overflow-hidden border-2 border-primary/50 avatar-glow ${getExpressionClass(displayStatus)}`}
               >
                 <img
                   src="/assets/generated/melina-avatar.dim_600x800.png"
@@ -292,7 +427,8 @@ export default function ChatPage() {
                 transition={{ delay: 0.5, duration: 0.5 }}
               >
                 <h1 className="font-display text-4xl font-bold glow-cyan text-primary tracking-widest">
-                  MELINA
+                  {assistantSettings?.assistantDisplayName?.toUpperCase() ||
+                    "MELINA"}
                 </h1>
                 <p className="font-mono text-xs text-muted-foreground mt-1 tracking-[0.3em] uppercase">
                   ARIA Intelligence Online
@@ -339,7 +475,7 @@ export default function ChatPage() {
               ARIA
             </span>
             <span className="font-mono text-[9px] text-muted-foreground ml-2 tracking-wider">
-              v1.0.0
+              v3.0.0
             </span>
           </div>
         </div>
@@ -350,6 +486,9 @@ export default function ChatPage() {
               {userProfile.username}
             </span>
           )}
+          {/* Settings gear */}
+          <SettingsSheet />
+
           <Button
             type="button"
             variant="ghost"
@@ -371,64 +510,49 @@ export default function ChatPage() {
           {/* Avatar section */}
           <div className="relative flex-shrink-0">
             <div className="relative overflow-hidden scanlines">
+              {/* Expression ring overlay */}
+              <div
+                className={`absolute inset-0 z-10 pointer-events-none rounded-sm ${getExpressionClass(displayStatus)}`}
+              />
+
               <img
                 src="/assets/generated/melina-avatar.dim_600x800.png"
                 alt="Melina Avatar"
                 className="w-full object-cover avatar-glow"
-                style={{ maxHeight: "300px", objectPosition: "top" }}
+                style={{ maxHeight: "240px", objectPosition: "top" }}
               />
 
               {/* Overlay gradient */}
               <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-background/90 to-transparent" />
 
               {/* HUD overlay elements */}
-              <div className="absolute top-2 left-2 font-mono text-[8px] text-primary/60 tracking-widest">
+              <div className="absolute top-2 left-2 font-mono text-[8px] text-primary/60 tracking-widest z-20">
                 ARIA·UNIT·001
               </div>
-              <div className="absolute top-2 right-2 font-mono text-[8px] text-primary/60 tracking-widest">
+              <div className="absolute top-2 right-2 font-mono text-[8px] text-primary/60 tracking-widest z-20">
                 ONLINE
               </div>
 
               {/* Bottom name overlay */}
-              <div className="absolute bottom-3 left-0 right-0 text-center">
-                <h2 className="font-display text-2xl font-bold tracking-[0.4em] glow-cyan text-primary uppercase">
-                  MELINA
+              <div className="absolute bottom-3 left-0 right-0 text-center z-20">
+                <h2 className="font-display text-xl font-bold tracking-[0.4em] glow-cyan text-primary uppercase">
+                  {assistantSettings?.assistantDisplayName?.toUpperCase() ||
+                    "MELINA"}
                 </h2>
               </div>
             </div>
 
             {/* Status indicator */}
-            <div className="flex justify-center py-2 border-b border-border/30">
-              <StatusDot status={status} />
+            <div className="flex justify-center py-1.5 border-b border-border/30">
+              <StatusDot status={displayStatus} />
             </div>
           </div>
 
-          {/* Scrollable bottom section */}
-          <div className="flex-1 overflow-y-auto p-2">
-            {/* Memory Panel */}
-            <MemoryPanel />
-
-            {/* HUD data strips */}
-            <div className="mt-3 space-y-1.5 px-1">
-              <div className="flex justify-between items-center">
-                <span className="font-mono text-[9px] text-muted-foreground uppercase tracking-wider">
-                  Messages
-                </span>
-                <span className="font-mono text-[9px] text-primary/70">
-                  {allMessages.length}
-                </span>
-              </div>
-              <div className="w-full h-px bg-gradient-to-r from-transparent via-primary/20 to-transparent" />
-              <div className="flex justify-between items-center">
-                <span className="font-mono text-[9px] text-muted-foreground uppercase tracking-wider">
-                  Memories
-                </span>
-                <span className="font-mono text-[9px] text-primary/70">
-                  {memoryEntries.length}
-                </span>
-              </div>
-            </div>
-          </div>
+          {/* Tabbed sidebar */}
+          <SidebarTabs
+            messageCount={allMessages.length}
+            memoryCount={memoryEntries.length}
+          />
         </aside>
 
         {/* ── Right Panel ── */}
@@ -512,16 +636,39 @@ export default function ChatPage() {
                           }`}
                         >
                           {msg.isVoiceNote && msg.audioUrl ? (
-                            <div className="flex items-center gap-2">
-                              <Mic className="w-3.5 h-3.5 text-primary/70 flex-shrink-0" />
-                              <audio
-                                controls
-                                src={msg.audioUrl}
-                                className="h-7 w-48 sm:w-64"
-                                style={{ minWidth: "160px" }}
-                              >
-                                <track kind="captions" />
-                              </audio>
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                <Mic className="w-3.5 h-3.5 text-primary/70 flex-shrink-0" />
+                                <audio
+                                  controls
+                                  src={msg.audioUrl}
+                                  className="h-7 w-48 sm:w-64"
+                                  style={{ minWidth: "160px" }}
+                                >
+                                  <track kind="captions" />
+                                </audio>
+                              </div>
+                              {msg.pendingSend && (
+                                <div className="flex items-center gap-1.5 pt-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => sendVoiceNote(msg.id)}
+                                    className="font-mono text-[9px] px-2 py-0.5 rounded-sm border border-primary/40 text-primary/80 hover:bg-primary/10 hover:border-primary/70 transition-all"
+                                    data-ocid="chat.voice_send_button"
+                                  >
+                                    Send to Melina
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => dismissVoiceNote(msg.id)}
+                                    className="h-5 w-5 flex items-center justify-center rounded-sm text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                                    data-ocid="chat.voice_dismiss_button"
+                                    aria-label="Dismiss voice note"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           ) : (
                             <p className="font-body text-sm leading-relaxed text-foreground/90">
@@ -530,10 +677,35 @@ export default function ChatPage() {
                           )}
                         </div>
 
-                        {/* Timestamp */}
-                        <span className="font-mono text-[9px] text-muted-foreground/60 px-1">
-                          {formatTime(msg.timestamp)}
-                        </span>
+                        {/* Timestamp + TTS button */}
+                        <div className="flex items-center gap-1 px-1">
+                          <span className="font-mono text-[9px] text-muted-foreground/60">
+                            {formatTime(msg.timestamp)}
+                          </span>
+                          {msg.role === "assistant" && hasTTS && (
+                            <button
+                              type="button"
+                              onClick={() => speak(msg.id, msg.content)}
+                              className={`h-5 w-5 p-0 flex items-center justify-center rounded-sm transition-all ${
+                                speakingId === msg.id
+                                  ? "text-primary drop-shadow-[0_0_4px_currentColor]"
+                                  : "text-muted-foreground/30 hover:text-muted-foreground/70"
+                              }`}
+                              aria-label={
+                                speakingId === msg.id
+                                  ? "Stop speaking"
+                                  : "Read aloud"
+                              }
+                              data-ocid={`chat.tts_button.${idx + 1}`}
+                            >
+                              {speakingId === msg.id ? (
+                                <VolumeX className="w-3 h-3" />
+                              ) : (
+                                <Volume2 className="w-3 h-3" />
+                              )}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </motion.div>
                   ))}
@@ -571,6 +743,13 @@ export default function ChatPage() {
               )}
             </div>
           </ScrollArea>
+
+          {/* Notification Advisor (between messages and input) */}
+          <NotificationAdvisor
+            notificationsEnabled={
+              assistantSettings?.notificationsEnabled ?? true
+            }
+          />
 
           {/* Input area */}
           <div className="flex-shrink-0 border-t border-border/50 bg-card/10 backdrop-blur-sm p-3">

@@ -1,5 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { MemoryEntry, Message, UserProfile } from "../backend.d";
+import type {
+  ActivityStats,
+  AssistantSettings,
+  IntegrationStatus,
+  MemoryEntry,
+  Message,
+  Notification,
+  Reminder,
+  UserProfile,
+} from "../backend.d";
 import { useActor } from "./useActor";
 
 // ─── Chat History ───────────────────────────────────────────────
@@ -27,6 +36,7 @@ export function useSendMessage() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["chatHistory"] });
+      void queryClient.invalidateQueries({ queryKey: ["activityStats"] });
     },
   });
 }
@@ -72,6 +82,7 @@ export function useUpdateMemory() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["memoryEntries"] });
+      void queryClient.invalidateQueries({ queryKey: ["activityStats"] });
     },
   });
 }
@@ -88,6 +99,7 @@ export function useDeleteMemory() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["memoryEntries"] });
+      void queryClient.invalidateQueries({ queryKey: ["activityStats"] });
     },
   });
 }
@@ -118,5 +130,202 @@ export function useSaveUserProfile() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["userProfile"] });
     },
+  });
+}
+
+// ─── Reminders ────────────────────────────────────────────────────
+export function useReminders() {
+  const { actor, isFetching } = useActor();
+  return useQuery<Reminder[]>({
+    queryKey: ["reminders"],
+    queryFn: async () => {
+      if (!actor) return [];
+      return actor.getReminders();
+    },
+    enabled: !!actor && !isFetching,
+  });
+}
+
+export function useCreateReminder() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      title,
+      note,
+      dueTime,
+    }: {
+      title: string;
+      note: string;
+      dueTime: bigint;
+    }) => {
+      if (!actor) throw new Error("Actor not available");
+      return actor.createReminder(title, note, dueTime);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["reminders"] });
+      void queryClient.invalidateQueries({ queryKey: ["activityStats"] });
+    },
+  });
+}
+
+export function useCompleteReminder() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: bigint) => {
+      if (!actor) throw new Error("Actor not available");
+      return actor.completeReminder(id);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["reminders"] });
+      void queryClient.invalidateQueries({ queryKey: ["activityStats"] });
+    },
+  });
+}
+
+export function useDeleteReminder() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: bigint) => {
+      if (!actor) throw new Error("Actor not available");
+      return actor.deleteReminder(id);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["reminders"] });
+      void queryClient.invalidateQueries({ queryKey: ["activityStats"] });
+    },
+  });
+}
+
+// ─── Notifications ─────────────────────────────────────────────────
+export function useNotifications() {
+  const { actor, isFetching } = useActor();
+  return useQuery<Notification[]>({
+    queryKey: ["notifications"],
+    queryFn: async () => {
+      if (!actor) return [];
+      return actor.getNotifications();
+    },
+    enabled: !!actor && !isFetching,
+  });
+}
+
+export function useDismissNotification() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: bigint) => {
+      if (!actor) throw new Error("Actor not available");
+      return actor.dismissNotification(id);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      void queryClient.invalidateQueries({ queryKey: ["activityStats"] });
+    },
+  });
+}
+
+export function useSeedNotifications() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      if (!actor) throw new Error("Actor not available");
+      return actor.seedMockNotifications();
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    },
+  });
+}
+
+// ─── Integrations ──────────────────────────────────────────────────
+export function useIntegrationStatus() {
+  const { actor, isFetching } = useActor();
+  return useQuery<IntegrationStatus>({
+    queryKey: ["integrations"],
+    queryFn: async () => {
+      if (!actor) {
+        return {
+          files: false,
+          contacts: false,
+          messages: false,
+          email: false,
+          calendar: false,
+          camera: false,
+        };
+      }
+      return actor.getIntegrationStatus();
+    },
+    enabled: !!actor && !isFetching,
+  });
+}
+
+export function useSetIntegration() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      integration,
+      enabled,
+    }: {
+      integration: string;
+      enabled: boolean;
+    }) => {
+      if (!actor) throw new Error("Actor not available");
+      return actor.setIntegrationStatus(integration, enabled);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["integrations"] });
+    },
+  });
+}
+
+// ─── Assistant Settings ────────────────────────────────────────────
+export function useAssistantSettings() {
+  const { actor, isFetching } = useActor();
+  return useQuery<AssistantSettings | null>({
+    queryKey: ["settings"],
+    queryFn: async () => {
+      if (!actor) return null;
+      return actor.getSettings();
+    },
+    enabled: !!actor && !isFetching,
+  });
+}
+
+export function useUpdateSettings() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (newSettings: AssistantSettings) => {
+      if (!actor) throw new Error("Actor not available");
+      return actor.updateSettings(newSettings);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
+// ─── Activity Stats ────────────────────────────────────────────────
+export function useActivityStats() {
+  const { actor, isFetching } = useActor();
+  return useQuery<ActivityStats | null>({
+    queryKey: ["activityStats"],
+    queryFn: async () => {
+      if (!actor) return null;
+      return actor.getActivityStats();
+    },
+    enabled: !!actor && !isFetching,
   });
 }

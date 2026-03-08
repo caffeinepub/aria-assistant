@@ -1,20 +1,17 @@
+import Iter "mo:core/Iter";
 import Map "mo:core/Map";
 import Text "mo:core/Text";
-import Nat "mo:core/Nat";
-import Principal "mo:core/Principal";
-import Iter "mo:core/Iter";
-import Runtime "mo:core/Runtime";
-import Time "mo:core/Time";
 import Array "mo:core/Array";
-import MixinAuthorization "authorization/MixinAuthorization";
+import List "mo:core/List";
+import Nat "mo:core/Nat";
+import Time "mo:core/Time";
+import Principal "mo:core/Principal";
+import Runtime "mo:core/Runtime";
 import AccessControl "authorization/access-control";
+import MixinAuthorization "authorization/MixinAuthorization";
 
 actor {
-  // Include the authorization component
-  let accessControlState = AccessControl.initState();
-  include MixinAuthorization(accessControlState);
-
-  type UserId = Principal;
+  public type UserId = Principal;
   type Timestamp = Int;
 
   public type UserProfile = {
@@ -23,7 +20,7 @@ actor {
   };
 
   public type Message = {
-    role : Text; // "user" or "assistant"
+    role : Text;
     content : Text;
     timestamp : Timestamp;
   };
@@ -42,11 +39,83 @@ actor {
     response : Text;
   };
 
+  public type Reminder = {
+    id : Nat;
+    title : Text;
+    note : Text;
+    dueTime : Timestamp;
+    completed : Bool;
+  };
+
+  public type NotificationSource = {
+    #calendar;
+    #email;
+    #message;
+  };
+
+  public type Notification = {
+    id : Nat;
+    source : NotificationSource;
+    content : Text;
+    suggestion : Text;
+    dismissed : Bool;
+  };
+
+  public type IntegrationStatus = {
+    calendar : Bool;
+    messages : Bool;
+    email : Bool;
+    files : Bool;
+    camera : Bool;
+    contacts : Bool;
+  };
+
+  public type ChatTone = {
+    #formal;
+    #friendly;
+    #casual;
+    #humorous;
+  };
+
+  public type AssistantSettings = {
+    tone : ChatTone;
+    notificationsEnabled : Bool;
+    memoryTrackingEnabled : Bool;
+    assistantDisplayName : Text;
+  };
+
+  public type ActivityStats = {
+    totalMessages : Nat;
+    pendingReminders : Nat;
+    completedReminders : Nat;
+    memoryEntries : Nat;
+    unreadNotifications : Nat;
+  };
+
+  let accessControlState = AccessControl.initState();
+  include MixinAuthorization(accessControlState);
+
   let chatHistories = Map.empty<UserId, [Message]>();
   let userMemories = Map.empty<UserId, Map.Map<Text, Text>>();
   let userProfiles = Map.empty<UserId, UserProfile>();
+  let reminders = Map.empty<UserId, Map.Map<Nat, Reminder>>();
+  let notifications = Map.empty<UserId, Map.Map<Nat, Notification>>();
+  let integrationStatuses = Map.empty<UserId, IntegrationStatus>();
+  let assistantSettings = Map.empty<UserId, AssistantSettings>();
 
-  // User Profile Management
+  var nextReminderId = 1;
+  var nextNotificationId = 1;
+
+  private func getOrCreateMap<K, V>(store : Map.Map<UserId, Map.Map<K, V>>, userId : UserId) : Map.Map<K, V> {
+    switch (store.get(userId)) {
+      case (null) {
+        let newMap = Map.empty<K, V>();
+        store.add(userId, newMap);
+        newMap;
+      };
+      case (?existing) { existing };
+    };
+  };
 
   public query ({ caller }) func getCallerUserProfile() : async ?UserProfile {
     if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
@@ -69,31 +138,23 @@ actor {
     userProfiles.add(caller, profile);
   };
 
-  // Memory management functions
-
   public shared ({ caller }) func updateMemoryEntry(key : Text, value : Text) : async () {
     if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
       Runtime.trap("Unauthorized: Only users can update memory entries");
     };
-
-    let existingMemory = switch (userMemories.get(caller)) {
-      case (null) { Map.empty<Text, Text>() };
-      case (?memory) { memory };
-    };
-
-    existingMemory.add(key, value);
-    userMemories.add(caller, existingMemory);
+    let memory = getOrCreateMap(userMemories, caller);
+    memory.add(key, value);
+    userMemories.add(caller, memory);
   };
 
   public query ({ caller }) func getAllMemoryEntries() : async [MemoryEntry] {
     if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
       Runtime.trap("Unauthorized: Only users can get memory entries");
     };
-
     switch (userMemories.get(caller)) {
       case (null) { [] };
       case (?memory) {
-        memory.entries().toArray().map(func((k, v)) : MemoryEntry { { key = k; value = v } });
+        memory.entries().toArray().map(func((k, v)) { { key = k; value = v } });
       };
     };
   };
@@ -102,7 +163,6 @@ actor {
     if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
       Runtime.trap("Unauthorized: Only users can delete memory entries");
     };
-
     switch (userMemories.get(caller)) {
       case (null) { () };
       case (?memory) {
@@ -112,7 +172,6 @@ actor {
     };
   };
 
-  // Chat history functions
   public query ({ caller }) func getChatHistory() : async [Message] {
     if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
       Runtime.trap("Unauthorized: Only users can get chat history");
@@ -130,62 +189,271 @@ actor {
     chatHistories.remove(caller);
   };
 
-  // Helper function to generate personalized response
-  private func generateMelinaResponse(caller : UserId, userMessage : Text) : Text {
-    // Get user's name from memory
-    let userName = switch (userMemories.get(caller)) {
-      case (null) { "there" };
-      case (?memory) {
-        switch (memory.get("name")) {
-          case (null) { "there" };
-          case (?name) { name };
-        };
-      };
+  public shared ({ caller }) func createReminder(title : Text, note : Text, dueTime : Timestamp) : async Nat {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can create reminders");
     };
 
-    // Get user's tone preference
-    let tone = switch (userMemories.get(caller)) {
-      case (null) { "friendly" };
-      case (?memory) {
-        switch (memory.get("tone")) {
-          case (null) { "friendly" };
-          case (?t) { t };
-        };
-      };
+    let newReminder : Reminder = {
+      id = nextReminderId;
+      title;
+      note;
+      dueTime;
+      completed = false;
     };
 
-    // Get recent chat context
-    let recentMessages = switch (chatHistories.get(caller)) {
-      case (null) { [] };
-      case (?history) {
-        if (history.size() > 5) {
-          history.sliceToArray(0, 5);
-        } else {
-          history;
-        };
-      };
-    };
+    let userReminders = getOrCreateMap(reminders, caller);
+    userReminders.add(newReminder.id, newReminder);
+    reminders.add(caller, userReminders);
 
-    // Generate contextual response (simplified AI simulation)
-    let greeting = if (recentMessages.size() == 0) {
-      "Hello " # userName # "! I'm Melina, your AI assistant. ";
-    } else { "" };
-
-    let response = greeting # "I understand you said: \"" # userMessage # "\". ";
-
-    // Add personalized touch based on tone
-    let personalizedResponse = if (tone == "formal") {
-      response # "I'm here to assist you professionally with any questions or tasks you may have.";
-    } else if (tone == "casual") {
-      response # "I'm here to help out however I can! What's on your mind?";
-    } else {
-      response # "I'm here to help you with whatever you need. How can I assist you today?";
-    };
-
-    personalizedResponse;
+    nextReminderId += 1;
+    newReminder.id;
   };
 
-  // Main chat endpoint
+  public query ({ caller }) func getReminders() : async [Reminder] {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can get reminders");
+    };
+
+    switch (reminders.get(caller)) {
+      case (null) { [] };
+      case (?userReminders) { userReminders.values().toArray() };
+    };
+  };
+
+  public shared ({ caller }) func completeReminder(id : Nat) : async () {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can complete reminders");
+    };
+
+    switch (reminders.get(caller)) {
+      case (null) { () };
+      case (?userReminders) {
+        switch (userReminders.get(id)) {
+          case (null) { () };
+          case (?reminder) {
+            let updatedReminder = { reminder with completed = true };
+            userReminders.add(id, updatedReminder);
+          };
+        };
+      };
+    };
+  };
+
+  public shared ({ caller }) func deleteReminder(id : Nat) : async () {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can delete reminders");
+    };
+
+    switch (reminders.get(caller)) {
+      case (null) { () };
+      case (?userReminders) {
+        userReminders.remove(id);
+      };
+    };
+  };
+
+  public shared ({ caller }) func seedMockNotifications() : async () {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can seed notifications");
+    };
+
+    let mockNotifications : [Notification] = [
+      {
+        id = nextNotificationId;
+        source = #calendar;
+        content = "Meeting with Alice at 2pm";
+        suggestion = "Would you like to set a reminder?";
+        dismissed = false;
+      },
+      {
+        id = nextNotificationId + 1;
+        source = #email;
+        content = "New email from Bob";
+        suggestion = "Do you want to read it now?";
+        dismissed = false;
+      },
+      {
+        id = nextNotificationId + 2;
+        source = #message;
+        content = "Message from Carol: 'Let's grab lunch'";
+        suggestion = "Should I suggest a location?";
+        dismissed = false;
+      },
+    ];
+
+    let userNotifications = getOrCreateMap(notifications, caller);
+
+    func addNotification(notification : Notification) {
+      userNotifications.add(notification.id, notification);
+    };
+
+    mockNotifications.values().forEach(addNotification);
+    notifications.add(caller, userNotifications);
+
+    nextNotificationId += 3;
+  };
+
+  public query ({ caller }) func getNotifications() : async [Notification] {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can get notifications");
+    };
+
+    switch (notifications.get(caller)) {
+      case (null) { [] };
+      case (?userNotifications) { userNotifications.values().toArray() };
+    };
+  };
+
+  public shared ({ caller }) func dismissNotification(id : Nat) : async () {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can dismiss notifications");
+    };
+
+    switch (notifications.get(caller)) {
+      case (null) { () };
+      case (?userNotifications) {
+        switch (userNotifications.get(id)) {
+          case (null) { () };
+          case (?notification) {
+            let updatedNotification = { notification with dismissed = true };
+            userNotifications.add(id, updatedNotification);
+          };
+        };
+      };
+    };
+  };
+
+  public shared ({ caller }) func setIntegrationStatus(integration : Text, enabled : Bool) : async () {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can set integration status");
+    };
+
+    let currentStatus = switch (integrationStatuses.get(caller)) {
+      case (null) {
+        {
+          calendar = false;
+          messages = false;
+          email = false;
+          files = false;
+          camera = false;
+          contacts = false;
+        };
+      };
+      case (?existing) { existing };
+    };
+
+    let updatedStatus = if (integration == "Calendar") {
+      { currentStatus with calendar = enabled };
+    } else if (integration == "Messages") {
+      { currentStatus with messages = enabled };
+    } else if (integration == "Email") {
+      { currentStatus with email = enabled };
+    } else if (integration == "Files") {
+      { currentStatus with files = enabled };
+    } else if (integration == "Camera") {
+      { currentStatus with camera = enabled };
+    } else if (integration == "Contacts") {
+      { currentStatus with contacts = enabled };
+    } else {
+      currentStatus;
+    };
+
+    integrationStatuses.add(caller, updatedStatus);
+  };
+
+  public query ({ caller }) func getIntegrationStatus() : async IntegrationStatus {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can get integration status");
+    };
+
+    switch (integrationStatuses.get(caller)) {
+      case (null) {
+        {
+          calendar = false;
+          messages = false;
+          email = false;
+          files = false;
+          camera = false;
+          contacts = false;
+        };
+      };
+      case (?status) { status };
+    };
+  };
+
+  public shared ({ caller }) func updateSettings(newSettings : AssistantSettings) : async () {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can update settings");
+    };
+    assistantSettings.add(caller, newSettings);
+  };
+
+  public query ({ caller }) func getSettings() : async AssistantSettings {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can get settings");
+    };
+
+    switch (assistantSettings.get(caller)) {
+      case (null) {
+        {
+          tone = #friendly;
+          notificationsEnabled = true;
+          memoryTrackingEnabled = true;
+          assistantDisplayName = "Melina";
+        };
+      };
+      case (?settings) { settings };
+    };
+  };
+
+  public query ({ caller }) func getActivityStats() : async ActivityStats {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can get activity stats");
+    };
+
+    let chatCount = switch (chatHistories.get(caller)) {
+      case (null) { 0 };
+      case (?history) { history.size() };
+    };
+
+    var pendingReminders = 0;
+    var completedReminders = 0;
+    switch (reminders.get(caller)) {
+      case (null) {};
+      case (?userReminders) {
+        userReminders.values().forEach(func(r) {
+          if (r.completed) { completedReminders += 1 } else {
+            pendingReminders += 1;
+          };
+        });
+      };
+    };
+
+    let memoryCount = switch (userMemories.get(caller)) {
+      case (null) { 0 };
+      case (?memory) { memory.size() };
+    };
+
+    var unreadCount = 0;
+    switch (notifications.get(caller)) {
+      case (null) {};
+      case (?userNotifications) {
+        userNotifications.values().forEach(func(n) {
+          if (not n.dismissed) { unreadCount += 1 };
+        });
+      };
+    };
+
+    {
+      totalMessages = chatCount;
+      pendingReminders;
+      completedReminders;
+      memoryEntries = memoryCount;
+      unreadNotifications = unreadCount;
+    };
+  };
+
   public shared ({ caller }) func chat(request : ChatRequest) : async ChatResponse {
     if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
       Runtime.trap("Unauthorized: Only users can chat");
@@ -194,7 +462,6 @@ actor {
     let userMessage = request.message;
     let timestamp = Time.now();
 
-    // Store user message
     let newUserMessage : Message = {
       role = "user";
       content = userMessage;
@@ -202,16 +469,14 @@ actor {
     };
 
     let history = switch (chatHistories.get(caller)) {
-      case (null) { [] };
+      case (null) { List.empty<Message>().toArray() };
       case (?h) { h };
     };
 
     let historyWithUser = [newUserMessage].concat(history);
 
-    // Generate Melina's response
-    let responseContent = generateMelinaResponse(caller, userMessage);
+    let responseContent = userMessage;
 
-    // Store assistant response
     let assistantMessage : Message = {
       role = "assistant";
       content = responseContent;
@@ -220,7 +485,6 @@ actor {
 
     let updatedHistory = [assistantMessage].concat(historyWithUser);
 
-    // Keep only the last 50 messages
     let trimmedHistory = if (updatedHistory.size() > 50) {
       updatedHistory.sliceToArray(0, 50);
     } else {
@@ -229,7 +493,6 @@ actor {
 
     chatHistories.add(caller, trimmedHistory);
 
-    // Return response
     {
       message = userMessage;
       response = responseContent;
