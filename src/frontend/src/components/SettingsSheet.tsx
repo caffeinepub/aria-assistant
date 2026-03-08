@@ -21,15 +21,21 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ChatTone } from "../backend.d";
 import { useAssistantSettings, useUpdateSettings } from "../hooks/useQueries";
+import { useTheme } from "../hooks/useTheme";
+import type { AppTheme } from "../hooks/useTheme";
 
 export default function SettingsSheet() {
   const { data: settings, isLoading } = useAssistantSettings();
   const updateSettings = useUpdateSettings();
+  const { theme, setTheme } = useTheme();
 
   const [displayName, setDisplayName] = useState("Melina");
   const [tone, setTone] = useState<ChatTone>(ChatTone.friendly);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [memoryTrackingEnabled, setMemoryTrackingEnabled] = useState(true);
+  const [autoSpeakEnabled, setAutoSpeakEnabled] = useState(
+    () => localStorage.getItem("aria_auto_speak") === "true",
+  );
   const [open, setOpen] = useState(false);
 
   // Sync from backend when settings load
@@ -41,6 +47,27 @@ export default function SettingsSheet() {
       setMemoryTrackingEnabled(settings.memoryTrackingEnabled ?? true);
     }
   }, [settings]);
+
+  // Sync auto-speak from localStorage
+  useEffect(() => {
+    const handler = () => {
+      setAutoSpeakEnabled(localStorage.getItem("aria_auto_speak") === "true");
+    };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }, []);
+
+  const handleAutoSpeakChange = (v: boolean) => {
+    setAutoSpeakEnabled(v);
+    localStorage.setItem("aria_auto_speak", v ? "true" : "false");
+    // Dispatch storage event so other tabs/components can react
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: "aria_auto_speak",
+        newValue: v ? "true" : "false",
+      }),
+    );
+  };
 
   const handleSave = async () => {
     try {
@@ -91,6 +118,84 @@ export default function SettingsSheet() {
             </div>
           ) : (
             <div className="p-4 space-y-6">
+              {/* ── Theme Section ── */}
+              <section className="space-y-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-3 h-px bg-primary/50" />
+                  <span className="font-mono text-[9px] tracking-[0.25em] uppercase text-primary/60">
+                    Interface Theme
+                  </span>
+                  <div className="flex-1 h-px bg-primary/10" />
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  {(
+                    [
+                      {
+                        id: "dark" as AppTheme,
+                        label: "Dark",
+                        swatch: "bg-slate-900",
+                        activeBorder: "border-cyan-500",
+                        inactiveBorder: "border-slate-700",
+                        ocid: "settings.dark_theme_button",
+                      },
+                      {
+                        id: "light" as AppTheme,
+                        label: "Light",
+                        swatch: "bg-white",
+                        activeBorder: "border-slate-500",
+                        inactiveBorder: "border-slate-300",
+                        ocid: "settings.light_theme_button",
+                      },
+                      {
+                        id: "red" as AppTheme,
+                        label: "Melina Red",
+                        swatch: "bg-red-950",
+                        activeBorder: "border-red-600",
+                        inactiveBorder: "border-red-900",
+                        ocid: "settings.red_theme_button",
+                      },
+                    ] as const
+                  ).map(
+                    ({
+                      id,
+                      label,
+                      swatch,
+                      activeBorder,
+                      inactiveBorder,
+                      ocid,
+                    }) => {
+                      const isActive = theme === id;
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => setTheme(id)}
+                          className={`flex flex-col items-center gap-1.5 p-1.5 rounded-sm border transition-all ${
+                            isActive
+                              ? `${activeBorder} shadow-[0_0_8px_currentColor] opacity-100`
+                              : `${inactiveBorder} opacity-60 hover:opacity-90`
+                          }`}
+                          aria-label={`Switch to ${label} theme`}
+                          data-ocid={ocid}
+                        >
+                          <div
+                            className={`w-full h-8 rounded-sm ${swatch} border ${isActive ? activeBorder : inactiveBorder} transition-all ${
+                              isActive
+                                ? "ring-2 ring-offset-1 ring-offset-card ring-current"
+                                : ""
+                            }`}
+                          />
+                          <span className="font-mono text-[8px] tracking-wide uppercase text-center leading-tight">
+                            {label}
+                          </span>
+                        </button>
+                      );
+                    },
+                  )}
+                </div>
+              </section>
+
               {/* ── Companion Section ── */}
               <section className="space-y-3">
                 <div className="flex items-center gap-2 mb-2">
@@ -181,6 +286,34 @@ export default function SettingsSheet() {
                     onCheckedChange={setNotificationsEnabled}
                     className="data-[state=checked]:bg-primary"
                     data-ocid="settings.notifications_switch"
+                  />
+                </div>
+              </section>
+
+              {/* ── Voice Section ── */}
+              <section className="space-y-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-3 h-px bg-primary/50" />
+                  <span className="font-mono text-[9px] tracking-[0.25em] uppercase text-primary/60">
+                    Voice
+                  </span>
+                  <div className="flex-1 h-px bg-primary/10" />
+                </div>
+
+                <div className="flex items-center justify-between gap-3 py-1">
+                  <div>
+                    <p className="font-mono text-xs text-foreground/80 tracking-wide">
+                      Auto-Speak
+                    </p>
+                    <p className="font-body text-[10px] text-muted-foreground/60 mt-0.5">
+                      Melina reads every response aloud automatically
+                    </p>
+                  </div>
+                  <Switch
+                    checked={autoSpeakEnabled}
+                    onCheckedChange={handleAutoSpeakChange}
+                    className="data-[state=checked]:bg-primary"
+                    data-ocid="settings.autospeak_switch"
                   />
                 </div>
               </section>

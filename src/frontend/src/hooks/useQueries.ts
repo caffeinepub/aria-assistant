@@ -7,6 +7,9 @@ import type {
   Message,
   Notification,
   Reminder,
+  ScheduleEvent,
+  ScheduleEventId,
+  Timestamp,
   UserProfile,
 } from "../backend.d";
 import { useActor } from "./useActor";
@@ -327,5 +330,135 @@ export function useActivityStats() {
       return actor.getActivityStats();
     },
     enabled: !!actor && !isFetching,
+  });
+}
+
+// ─── Schedule Events ───────────────────────────────────────────────
+export function useScheduleEvents() {
+  const { actor, isFetching } = useActor();
+  return useQuery<ScheduleEvent[]>({
+    queryKey: ["scheduleEvents"],
+    queryFn: async () => {
+      if (!actor) return [];
+      return actor.getScheduleEvents();
+    },
+    enabled: !!actor && !isFetching,
+  });
+}
+
+export function useScheduleEventsByDate(date: string) {
+  const { actor, isFetching } = useActor();
+  return useQuery<ScheduleEvent[]>({
+    queryKey: ["scheduleEvents", "byDate", date],
+    queryFn: async () => {
+      if (!actor) return [];
+      return actor.getScheduleEventsByDate(date);
+    },
+    enabled: !!actor && !isFetching && !!date,
+  });
+}
+
+export function useCreateScheduleEvent() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      title,
+      note,
+      category,
+      startTime,
+      endTime,
+      date,
+    }: {
+      title: string;
+      note: string;
+      category: string;
+      startTime: Timestamp;
+      endTime: Timestamp;
+      date: string;
+    }) => {
+      if (!actor) throw new Error("Actor not available");
+      return actor.createScheduleEvent(
+        title,
+        note,
+        category,
+        startTime,
+        endTime,
+        date,
+      );
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["scheduleEvents"] });
+    },
+  });
+}
+
+export function useUpdateScheduleEvent() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      title,
+      note,
+      category,
+      startTime,
+      endTime,
+      date,
+    }: {
+      id: ScheduleEventId;
+      title: string;
+      note: string;
+      category: string;
+      startTime: Timestamp;
+      endTime: Timestamp;
+      date: string;
+    }) => {
+      if (!actor) throw new Error("Actor not available");
+      return actor.updateScheduleEvent(
+        id,
+        title,
+        note,
+        category,
+        startTime,
+        endTime,
+        date,
+      );
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["scheduleEvents"] });
+    },
+  });
+}
+
+export function useDeleteScheduleEvent() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: ScheduleEventId) => {
+      if (!actor) throw new Error("Actor not available");
+      return actor.deleteScheduleEvent(id);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["scheduleEvents"] });
+    },
+  });
+}
+
+export function useCompleteScheduleEvent() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: ScheduleEventId) => {
+      if (!actor) throw new Error("Actor not available");
+      return actor.completeScheduleEvent(id);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["scheduleEvents"] });
+    },
   });
 }

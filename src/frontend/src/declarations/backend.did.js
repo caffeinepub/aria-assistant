@@ -18,6 +18,7 @@ export const ChatResponse = IDL.Record({
   'message' : IDL.Text,
   'response' : IDL.Text,
 });
+export const ScheduleEventId = IDL.Nat;
 export const Timestamp = IDL.Int;
 export const ActivityStats = IDL.Record({
   'unreadNotifications' : IDL.Nat,
@@ -63,6 +64,16 @@ export const Reminder = IDL.Record({
   'completed' : IDL.Bool,
   'dueTime' : Timestamp,
 });
+export const ScheduleEvent = IDL.Record({
+  'id' : ScheduleEventId,
+  'startTime' : Timestamp,
+  'title' : IDL.Text,
+  'endTime' : Timestamp,
+  'date' : IDL.Text,
+  'note' : IDL.Text,
+  'completed' : IDL.Bool,
+  'category' : IDL.Text,
+});
 export const ChatTone = IDL.Variant({
   'humorous' : IDL.Null,
   'friendly' : IDL.Null,
@@ -82,9 +93,16 @@ export const idlService = IDL.Service({
   'chat' : IDL.Func([ChatRequest], [ChatResponse], []),
   'clearChatHistory' : IDL.Func([], [], []),
   'completeReminder' : IDL.Func([IDL.Nat], [], []),
+  'completeScheduleEvent' : IDL.Func([ScheduleEventId], [IDL.Bool], []),
   'createReminder' : IDL.Func([IDL.Text, IDL.Text, Timestamp], [IDL.Nat], []),
+  'createScheduleEvent' : IDL.Func(
+      [IDL.Text, IDL.Text, IDL.Text, Timestamp, Timestamp, IDL.Text],
+      [ScheduleEventId],
+      [],
+    ),
   'deleteMemoryEntry' : IDL.Func([IDL.Text], [], []),
   'deleteReminder' : IDL.Func([IDL.Nat], [], []),
+  'deleteScheduleEvent' : IDL.Func([ScheduleEventId], [IDL.Bool], []),
   'dismissNotification' : IDL.Func([IDL.Nat], [], []),
   'getActivityStats' : IDL.Func([], [ActivityStats], ['query']),
   'getAllMemoryEntries' : IDL.Func([], [IDL.Vec(MemoryEntry)], ['query']),
@@ -94,6 +112,12 @@ export const idlService = IDL.Service({
   'getIntegrationStatus' : IDL.Func([], [IntegrationStatus], ['query']),
   'getNotifications' : IDL.Func([], [IDL.Vec(Notification)], ['query']),
   'getReminders' : IDL.Func([], [IDL.Vec(Reminder)], ['query']),
+  'getScheduleEvents' : IDL.Func([], [IDL.Vec(ScheduleEvent)], ['query']),
+  'getScheduleEventsByDate' : IDL.Func(
+      [IDL.Text],
+      [IDL.Vec(ScheduleEvent)],
+      ['query'],
+    ),
   'getSettings' : IDL.Func([], [AssistantSettings], ['query']),
   'getUserProfile' : IDL.Func(
       [IDL.Principal],
@@ -105,6 +129,19 @@ export const idlService = IDL.Service({
   'seedMockNotifications' : IDL.Func([], [], []),
   'setIntegrationStatus' : IDL.Func([IDL.Text, IDL.Bool], [], []),
   'updateMemoryEntry' : IDL.Func([IDL.Text, IDL.Text], [], []),
+  'updateScheduleEvent' : IDL.Func(
+      [
+        ScheduleEventId,
+        IDL.Text,
+        IDL.Text,
+        IDL.Text,
+        Timestamp,
+        Timestamp,
+        IDL.Text,
+      ],
+      [IDL.Bool],
+      [],
+    ),
   'updateSettings' : IDL.Func([AssistantSettings], [], []),
 });
 
@@ -121,6 +158,7 @@ export const idlFactory = ({ IDL }) => {
     'message' : IDL.Text,
     'response' : IDL.Text,
   });
+  const ScheduleEventId = IDL.Nat;
   const Timestamp = IDL.Int;
   const ActivityStats = IDL.Record({
     'unreadNotifications' : IDL.Nat,
@@ -163,6 +201,16 @@ export const idlFactory = ({ IDL }) => {
     'completed' : IDL.Bool,
     'dueTime' : Timestamp,
   });
+  const ScheduleEvent = IDL.Record({
+    'id' : ScheduleEventId,
+    'startTime' : Timestamp,
+    'title' : IDL.Text,
+    'endTime' : Timestamp,
+    'date' : IDL.Text,
+    'note' : IDL.Text,
+    'completed' : IDL.Bool,
+    'category' : IDL.Text,
+  });
   const ChatTone = IDL.Variant({
     'humorous' : IDL.Null,
     'friendly' : IDL.Null,
@@ -182,9 +230,16 @@ export const idlFactory = ({ IDL }) => {
     'chat' : IDL.Func([ChatRequest], [ChatResponse], []),
     'clearChatHistory' : IDL.Func([], [], []),
     'completeReminder' : IDL.Func([IDL.Nat], [], []),
+    'completeScheduleEvent' : IDL.Func([ScheduleEventId], [IDL.Bool], []),
     'createReminder' : IDL.Func([IDL.Text, IDL.Text, Timestamp], [IDL.Nat], []),
+    'createScheduleEvent' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text, Timestamp, Timestamp, IDL.Text],
+        [ScheduleEventId],
+        [],
+      ),
     'deleteMemoryEntry' : IDL.Func([IDL.Text], [], []),
     'deleteReminder' : IDL.Func([IDL.Nat], [], []),
+    'deleteScheduleEvent' : IDL.Func([ScheduleEventId], [IDL.Bool], []),
     'dismissNotification' : IDL.Func([IDL.Nat], [], []),
     'getActivityStats' : IDL.Func([], [ActivityStats], ['query']),
     'getAllMemoryEntries' : IDL.Func([], [IDL.Vec(MemoryEntry)], ['query']),
@@ -194,6 +249,12 @@ export const idlFactory = ({ IDL }) => {
     'getIntegrationStatus' : IDL.Func([], [IntegrationStatus], ['query']),
     'getNotifications' : IDL.Func([], [IDL.Vec(Notification)], ['query']),
     'getReminders' : IDL.Func([], [IDL.Vec(Reminder)], ['query']),
+    'getScheduleEvents' : IDL.Func([], [IDL.Vec(ScheduleEvent)], ['query']),
+    'getScheduleEventsByDate' : IDL.Func(
+        [IDL.Text],
+        [IDL.Vec(ScheduleEvent)],
+        ['query'],
+      ),
     'getSettings' : IDL.Func([], [AssistantSettings], ['query']),
     'getUserProfile' : IDL.Func(
         [IDL.Principal],
@@ -205,6 +266,19 @@ export const idlFactory = ({ IDL }) => {
     'seedMockNotifications' : IDL.Func([], [], []),
     'setIntegrationStatus' : IDL.Func([IDL.Text, IDL.Bool], [], []),
     'updateMemoryEntry' : IDL.Func([IDL.Text, IDL.Text], [], []),
+    'updateScheduleEvent' : IDL.Func(
+        [
+          ScheduleEventId,
+          IDL.Text,
+          IDL.Text,
+          IDL.Text,
+          Timestamp,
+          Timestamp,
+          IDL.Text,
+        ],
+        [IDL.Bool],
+        [],
+      ),
     'updateSettings' : IDL.Func([AssistantSettings], [], []),
   });
 };

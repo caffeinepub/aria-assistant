@@ -4,15 +4,20 @@ import Text "mo:core/Text";
 import Array "mo:core/Array";
 import List "mo:core/List";
 import Nat "mo:core/Nat";
+import Int "mo:core/Int";
 import Time "mo:core/Time";
 import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import AccessControl "authorization/access-control";
 import MixinAuthorization "authorization/MixinAuthorization";
+import Migration "migration";
+import Timestamp "mo:core/Time";
 
+(with migration = Migration.run)
 actor {
-  public type UserId = Principal;
   type Timestamp = Int;
+  public type UserId = Principal;
+  type ScheduleEventId = Nat;
 
   public type UserProfile = {
     username : Text;
@@ -92,6 +97,17 @@ actor {
     unreadNotifications : Nat;
   };
 
+  public type ScheduleEvent = {
+    id : ScheduleEventId;
+    title : Text;
+    note : Text;
+    category : Text;
+    startTime : Timestamp;
+    endTime : Timestamp;
+    date : Text;
+    completed : Bool;
+  };
+
   let accessControlState = AccessControl.initState();
   include MixinAuthorization(accessControlState);
 
@@ -103,10 +119,20 @@ actor {
   let integrationStatuses = Map.empty<UserId, IntegrationStatus>();
   let assistantSettings = Map.empty<UserId, AssistantSettings>();
 
+  // Separate ID counters for reminders and notifications
   var nextReminderId = 1;
   var nextNotificationId = 1;
 
-  private func getOrCreateMap<K, V>(store : Map.Map<UserId, Map.Map<K, V>>, userId : UserId) : Map.Map<K, V> {
+  // Schedule events: per-user, persistent, with correct ID handling and data migration
+  let scheduleEvents = Map.empty<UserId, Map.Map<ScheduleEventId, ScheduleEvent>>();
+
+  // Start IDs from 1 to match other patterns
+  var nextScheduleEventId : ScheduleEventId = 1;
+
+  type MapStore<K, V> = Map.Map<UserId, Map.Map<K, V>>;
+
+  // Helper function to retrieve or initialize a nested map for a user
+  private func getOrCreateMap<K, V>(store : MapStore<K, V>, userId : UserId) : Map.Map<K, V> {
     switch (store.get(userId)) {
       case (null) {
         let newMap = Map.empty<K, V>();
@@ -496,6 +522,136 @@ actor {
     {
       message = userMessage;
       response = responseContent;
+    };
+  };
+
+  /////////////////////////////////////////////////////////////
+  // Schedule Event CRUD
+  /////////////////////////////////////////////////////////////
+
+  public shared ({ caller }) func createScheduleEvent(
+    title : Text,
+    note : Text,
+    category : Text,
+    startTime : Timestamp,
+    endTime : Timestamp,
+    date : Text
+  ) : async ScheduleEventId {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can create schedule events");
+    };
+
+    let newEvent : ScheduleEvent = {
+      id = nextScheduleEventId;
+      title;
+      note;
+      category;
+      startTime;
+      endTime;
+      date;
+      completed = false;
+    };
+
+    let userEvents = getOrCreateMap(scheduleEvents, caller);
+    userEvents.add(newEvent.id, newEvent);
+    scheduleEvents.add(caller, userEvents);
+
+    nextScheduleEventId += 1;
+    newEvent.id;
+  };
+
+  public query ({ caller }) func getScheduleEvents() : async [ScheduleEvent] {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can get schedule events");
+    };
+
+    switch (scheduleEvents.get(caller)) {
+      case (null) { [] };
+      case (?userEvents) { userEvents.values().toArray() };
+    };
+  };
+
+  public query ({ caller }) func getScheduleEventsByDate(date : Text) : async [ScheduleEvent] {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can get events by date");
+    };
+
+    switch (scheduleEvents.get(caller)) {
+      case (null) { [] };
+      case (?userEvents) {
+        let allEvents = userEvents.values().toArray();
+        allEvents.filter(func(e) { e.date == date });
+      };
+    };
+  };
+
+  public shared ({ caller }) func updateScheduleEvent(
+    id : ScheduleEventId,
+    title : Text,
+    note : Text,
+    category : Text,
+    startTime : Timestamp,
+    endTime : Timestamp,
+    date : Text
+  ) : async Bool {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can update schedule events");
+    };
+
+    switch (scheduleEvents.get(caller)) {
+      case (null) { false };
+      case (?userEvents) {
+        switch (userEvents.get(id)) {
+          case (null) { false };
+          case (?existing) {
+            let updatedEvent = {
+              existing with
+              title;
+              note;
+              category;
+              startTime;
+              endTime;
+              date;
+            };
+            userEvents.add(id, updatedEvent);
+            true;
+          };
+        };
+      };
+    };
+  };
+
+  public shared ({ caller }) func deleteScheduleEvent(id : ScheduleEventId) : async Bool {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can delete schedule events");
+    };
+
+    switch (scheduleEvents.get(caller)) {
+      case (null) { false };
+      case (?userEvents) {
+        userEvents.remove(id);
+        true;
+      };
+    };
+  };
+
+  public shared ({ caller }) func completeScheduleEvent(id : ScheduleEventId) : async Bool {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can complete schedule events");
+    };
+
+    switch (scheduleEvents.get(caller)) {
+      case (null) { false };
+      case (?userEvents) {
+        switch (userEvents.get(id)) {
+          case (null) { false };
+          case (?event) {
+            let updatedEvent = { event with completed = true };
+            userEvents.add(id, updatedEvent);
+            true;
+          };
+        };
+      };
     };
   };
 };

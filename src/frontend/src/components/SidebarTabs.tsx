@@ -27,8 +27,12 @@ import {
   useUpdateSettings,
   useUserProfile,
 } from "../hooks/useQueries";
+import AnalyticsPanel from "./AnalyticsPanel";
 import DashboardPanel from "./DashboardPanel";
+import HabitsPanel from "./HabitsPanel";
+import InsightsPanel from "./InsightsPanel";
 import MemoryPanel from "./MemoryPanel";
+import SchedulePlanner from "./SchedulePlanner";
 
 // ── Integration grid ──────────────────────────────────────────────
 type IntegrationKey = keyof IntegrationStatus;
@@ -325,8 +329,8 @@ function ProfileTab() {
   const toneLabels: Record<ChatTone, string> = {
     [ChatTone.formal]: "Formal",
     [ChatTone.friendly]: "Friendly",
-    [ChatTone.casual]: "Casual",
-    [ChatTone.humorous]: "Humorous",
+    [ChatTone.casual]: "Teasing",
+    [ChatTone.humorous]: "Witty",
   };
 
   return (
@@ -498,56 +502,101 @@ function IntegrationsTab() {
 export default function SidebarTabs({
   messageCount,
   memoryCount,
+  activeTab,
+  onTabChange,
 }: {
   messageCount: number;
   memoryCount: number;
+  activeTab?: string;
+  onTabChange?: (tab: string) => void;
 }) {
+  const tabClass =
+    "flex-1 h-full rounded-none text-[5.8px] font-mono tracking-[0.04em] uppercase px-0 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none border-r border-border/20";
+
   return (
     <Tabs
+      value={activeTab}
       defaultValue="dashboard"
+      onValueChange={onTabChange}
       className="flex-1 flex flex-col overflow-hidden sidebar-tabs"
     >
       <TabsList className="flex w-full rounded-none bg-card/10 border-b border-border/30 h-8 p-0 flex-shrink-0">
         <TabsTrigger
           value="dashboard"
-          className="flex-1 h-full rounded-none text-[7px] font-mono tracking-[0.08em] uppercase px-0.5 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none border-r border-border/20"
+          className={tabClass}
           data-ocid="sidebar.dashboard_tab"
         >
           Dash
         </TabsTrigger>
         <TabsTrigger
+          value="stats"
+          className={tabClass}
+          data-ocid="sidebar.stats_tab"
+        >
+          Stats
+        </TabsTrigger>
+        <TabsTrigger
+          value="insights"
+          className={tabClass}
+          data-ocid="sidebar.insights_tab"
+        >
+          Insght
+        </TabsTrigger>
+        <TabsTrigger
           value="profile"
-          className="flex-1 h-full rounded-none text-[7px] font-mono tracking-[0.08em] uppercase px-0.5 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none border-r border-border/20"
+          className={tabClass}
           data-ocid="sidebar.profile_tab"
         >
-          Profile
+          Prof
         </TabsTrigger>
         <TabsTrigger
           value="reminders"
-          className="flex-1 h-full rounded-none text-[7px] font-mono tracking-[0.08em] uppercase px-0.5 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none border-r border-border/20"
+          className={tabClass}
           data-ocid="sidebar.reminders_tab"
         >
-          Remind
+          Rmnd
         </TabsTrigger>
         <TabsTrigger
-          value="integrations"
-          className="flex-1 h-full rounded-none text-[7px] font-mono tracking-[0.08em] uppercase px-0.5 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none border-r border-border/20"
-          data-ocid="sidebar.integrations_tab"
+          value="schedule"
+          className={tabClass}
+          data-ocid="sidebar.schedule_tab"
         >
-          Integr
+          Sched
+        </TabsTrigger>
+        <TabsTrigger
+          value="habits"
+          className={tabClass}
+          data-ocid="sidebar.habits_tab"
+        >
+          Habits
         </TabsTrigger>
         <TabsTrigger
           value="memory"
-          className="flex-1 h-full rounded-none text-[7px] font-mono tracking-[0.08em] uppercase px-0.5 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none"
+          className={tabClass}
           data-ocid="sidebar.memory_tab"
         >
-          Memory
+          Mem
+        </TabsTrigger>
+        <TabsTrigger
+          value="integrations"
+          className="flex-1 h-full rounded-none text-[5.8px] font-mono tracking-[0.04em] uppercase px-0 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none"
+          data-ocid="sidebar.integrations_tab"
+        >
+          Intgr
         </TabsTrigger>
       </TabsList>
 
       <div className="flex-1 overflow-y-auto">
         <TabsContent value="dashboard" className="m-0 p-2">
           <DashboardPanel />
+        </TabsContent>
+
+        <TabsContent value="stats" className="m-0 p-2">
+          <AnalyticsPanel />
+        </TabsContent>
+
+        <TabsContent value="insights" className="m-0 p-2">
+          <InsightsPanel onNavigate={onTabChange ?? (() => {})} />
         </TabsContent>
 
         <TabsContent value="profile" className="m-0 p-2 space-y-2">
@@ -558,12 +607,20 @@ export default function SidebarTabs({
           <RemindersTab />
         </TabsContent>
 
-        <TabsContent value="integrations" className="m-0 p-2">
-          <IntegrationsTab />
+        <TabsContent value="schedule" className="m-0 p-2 h-full">
+          <SchedulePlanner />
+        </TabsContent>
+
+        <TabsContent value="habits" className="m-0 p-2">
+          <HabitsPanel />
         </TabsContent>
 
         <TabsContent value="memory" className="m-0 p-2">
           <MemoryPanel />
+        </TabsContent>
+
+        <TabsContent value="integrations" className="m-0 p-2">
+          <IntegrationsTab />
         </TabsContent>
       </div>
 

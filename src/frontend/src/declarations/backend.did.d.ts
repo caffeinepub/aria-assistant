@@ -60,6 +60,17 @@ export interface Reminder {
   'completed' : boolean,
   'dueTime' : Timestamp,
 }
+export interface ScheduleEvent {
+  'id' : ScheduleEventId,
+  'startTime' : Timestamp,
+  'title' : string,
+  'endTime' : Timestamp,
+  'date' : string,
+  'note' : string,
+  'completed' : boolean,
+  'category' : string,
+}
+export type ScheduleEventId = bigint;
 export type Timestamp = bigint;
 export interface UserProfile { 'username' : string, 'email' : string }
 export type UserRole = { 'admin' : null } |
@@ -71,9 +82,15 @@ export interface _SERVICE {
   'chat' : ActorMethod<[ChatRequest], ChatResponse>,
   'clearChatHistory' : ActorMethod<[], undefined>,
   'completeReminder' : ActorMethod<[bigint], undefined>,
+  'completeScheduleEvent' : ActorMethod<[ScheduleEventId], boolean>,
   'createReminder' : ActorMethod<[string, string, Timestamp], bigint>,
+  'createScheduleEvent' : ActorMethod<
+    [string, string, string, Timestamp, Timestamp, string],
+    ScheduleEventId
+  >,
   'deleteMemoryEntry' : ActorMethod<[string], undefined>,
   'deleteReminder' : ActorMethod<[bigint], undefined>,
+  'deleteScheduleEvent' : ActorMethod<[ScheduleEventId], boolean>,
   'dismissNotification' : ActorMethod<[bigint], undefined>,
   'getActivityStats' : ActorMethod<[], ActivityStats>,
   'getAllMemoryEntries' : ActorMethod<[], Array<MemoryEntry>>,
@@ -83,6 +100,8 @@ export interface _SERVICE {
   'getIntegrationStatus' : ActorMethod<[], IntegrationStatus>,
   'getNotifications' : ActorMethod<[], Array<Notification>>,
   'getReminders' : ActorMethod<[], Array<Reminder>>,
+  'getScheduleEvents' : ActorMethod<[], Array<ScheduleEvent>>,
+  'getScheduleEventsByDate' : ActorMethod<[string], Array<ScheduleEvent>>,
   'getSettings' : ActorMethod<[], AssistantSettings>,
   'getUserProfile' : ActorMethod<[Principal], [] | [UserProfile]>,
   'isCallerAdmin' : ActorMethod<[], boolean>,
@@ -90,6 +109,10 @@ export interface _SERVICE {
   'seedMockNotifications' : ActorMethod<[], undefined>,
   'setIntegrationStatus' : ActorMethod<[string, boolean], undefined>,
   'updateMemoryEntry' : ActorMethod<[string, string], undefined>,
+  'updateScheduleEvent' : ActorMethod<
+    [ScheduleEventId, string, string, string, Timestamp, Timestamp, string],
+    boolean
+  >,
   'updateSettings' : ActorMethod<[AssistantSettings], undefined>,
 }
 export declare const idlService: IDL.ServiceClass;
