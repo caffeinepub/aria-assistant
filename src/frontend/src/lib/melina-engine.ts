@@ -1,13 +1,11 @@
 /**
- * Melina Personality Engine — Phase 3B
- * Pure TypeScript frontend intelligence layer.
- * Interprets user intent and generates personality-driven responses.
+ * Melina Personality Engine — Phase 7C
+ * Response intelligence polish: topic detection, session memory callbacks,
+ * varied sentence structure, and natural personality-driven filler phrases.
  */
 
 import type { MemoryEntry, Reminder } from "../backend.d";
 import { ChatTone } from "../backend.d";
-
-// ─── Types ──────────────────────────────────────────────────────────
 
 export interface MelinaEngineParams {
   message: string;
@@ -23,865 +21,1239 @@ export interface MelinaEngineResult {
   learnedName?: string;
 }
 
-// ─── Intent Detectors ───────────────────────────────────────────────
-
-function detectDistress(msg: string): boolean {
-  const lower = msg.toLowerCase();
-  return [
-    "sad",
-    "depressed",
-    "anxious",
-    "scared",
-    "lonely",
-    "crying",
-    " hurt",
-    " pain",
-    "help me",
-    "i give up",
-    "hopeless",
-    "stressed",
-    "worried",
-    "terrible",
-    "awful",
-    "i can't",
-    "i cant",
-    "overwhelmed",
-    "exhausted",
-    "broken",
-  ].some((kw) => lower.includes(kw));
+function pick<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function detectGreeting(msg: string): boolean {
-  const lower = msg.trim().toLowerCase();
-  return [
-    "hello",
-    "hi ",
-    "hi,",
-    "hi!",
-    "hey ",
-    "hey,",
-    "hey!",
-    "good morning",
-    "good evening",
-    "good afternoon",
-    "good night",
-    "sup",
-    "howdy",
-    "hola",
-    "what's up",
-    "whats up",
-    "yo ",
-  ].some((kw) => lower.startsWith(kw) || lower === kw.trim());
+function includes(msg: string, ...terms: string[]): boolean {
+  const l = msg.toLowerCase();
+  return terms.some((t) => l.includes(t));
 }
 
-function detectCompliment(msg: string): boolean {
-  const lower = msg.toLowerCase();
-  return [
-    "thank",
-    "great job",
-    "good job",
-    "you're amazing",
-    "youre amazing",
-    "love you",
-    "awesome",
-    "brilliant",
-    "you're great",
-    "youre great",
-    "well done",
-    "perfect",
-    "incredible",
-    "you rock",
-  ].some((kw) => lower.includes(kw));
+function startsWith(msg: string, ...terms: string[]): boolean {
+  const l = msg.trim().toLowerCase();
+  return terms.some((t) => l.startsWith(t));
 }
 
-function detectReminderIntent(msg: string): boolean {
-  const lower = msg.toLowerCase();
-  return [
-    "remind me",
-    "set a reminder",
-    "don't let me forget",
-    "dont let me forget",
-    "remember to",
-    "set reminder",
-    "add reminder",
-  ].some((kw) => lower.includes(kw));
-}
-
-function detectTaskIntent(msg: string): boolean {
-  const lower = msg.toLowerCase();
-  return [
-    "plan ",
-    "schedule ",
-    "organize ",
-    "help me with",
-    "create a ",
-    "make a list",
-    "what should i",
-    "how should i",
-    "can you help me",
-    "i need to",
-    "to-do",
-    "todo",
-  ].some((kw) => lower.includes(kw));
-}
-
-function detectHabitIntent(msg: string): boolean {
-  const lower = msg.toLowerCase();
-  return [
-    "track habit",
-    "log habit",
-    "my habits",
-    "show habits",
-    "habit tracker",
-    "check in",
-    "workout logged",
-    "habit check",
-    "how am i doing",
-    "my progress",
-    "daily habits",
-    "weekly habits",
-    "add a habit",
-    "new habit",
-    "habit streak",
-  ].some((kw) => lower.includes(kw));
-}
-
-export function detectScheduleIntent(msg: string): boolean {
-  const lower = msg.toLowerCase();
-  return [
-    "what's on my schedule",
-    "whats on my schedule",
-    "my schedule",
-    "schedule for today",
-    "add to schedule",
-    "my day",
-    "today's events",
-    "todays events",
-    "what do i have today",
-    "my calendar",
-    "what's planned",
-    "whats planned",
-    "today's agenda",
-    "todays agenda",
-  ].some((kw) => lower.includes(kw));
-}
-
-export function detectInsightIntent(msg: string): boolean {
-  const lower = msg.toLowerCase();
-  return [
-    "any insights",
-    "what should i do",
-    "suggestions",
-    "advice for today",
-    "tips",
-    "productivity",
-    "how am i doing today",
-    "give me advice",
-    "what do you suggest",
-    "any recommendations",
-    "smart suggestions",
-    "what should i focus",
-  ].some((kw) => lower.includes(kw));
-}
-
-function detectFactualQuery(msg: string): boolean {
-  const lower = msg.toLowerCase();
-  return [
-    "what is ",
-    "what are ",
-    "who is ",
-    "who are ",
-    "when did ",
-    "how does ",
-    "how do ",
-    "why is ",
-    "why does ",
-    "explain ",
-    "define ",
-    "tell me about",
-    "describe ",
-    "where is ",
-    "where are ",
-    "how many ",
-    "how much ",
-    "what was ",
-    "what were ",
-  ].some((kw) => lower.startsWith(kw) || lower.includes(kw));
-}
-
-function detectNameLearning(msg: string): string | null {
-  const lower = msg.toLowerCase().trim();
+function extractNameLearning(msg: string): string | null {
   const patterns = [
-    /my name is\s+(\w+)/i,
-    /call me\s+(\w+)/i,
-    /^i am\s+(\w+)/i,
-    /^i'm\s+(\w+)/i,
+    /my name is ([\w]+)/i,
+    /i'm ([\w]+)/i,
+    /i am ([\w]+)/i,
+    /call me ([\w]+)/i,
+    /name'?s? ([\w]+)/i,
   ];
   for (const p of patterns) {
-    const m = lower.match(p);
-    if (m?.[1]) {
-      const name = m[1].trim();
-      if (
-        name.length > 1 &&
-        !["a", "an", "the", "not", "so", "just"].includes(name)
-      ) {
-        return name.charAt(0).toUpperCase() + name.slice(1);
-      }
+    const m = msg.match(p);
+    if (
+      m?.[1] &&
+      m[1].length > 1 &&
+      !m[1]
+        .toLowerCase()
+        .match(/^(a|an|the|just|only|here|sure|good|fine|ok|okay|not|so|very)$/)
+    ) {
+      return m[1].charAt(0).toUpperCase() + m[1].slice(1);
     }
   }
   return null;
 }
 
-function detectMemoryRecall(msg: string): boolean {
-  const lower = msg.toLowerCase();
-  return [
-    "what do you know about me",
-    "what have you remembered",
-    "my memories",
-    "what do you remember",
-    "what have you learned",
-    "show me what you know",
-  ].some((kw) => lower.includes(kw));
+// ─── Topic Detection (Phase 7C) ────────────────────────────────────────────
+
+type Topic =
+  | "tech"
+  | "philosophy"
+  | "lifestyle"
+  | "work"
+  | "creative"
+  | "emotional"
+  | "random"
+  | "none";
+
+function detectTopic(msg: string): Topic {
+  if (
+    includes(
+      msg,
+      "code",
+      "coding",
+      "programming",
+      "software",
+      "app",
+      "computer",
+      "api",
+      "algorithm",
+      "data",
+      "ai",
+      "model",
+      "tech",
+      "developer",
+      "website",
+      "server",
+      "database",
+      "machine learning",
+      "neural",
+    )
+  )
+    return "tech";
+
+  if (
+    includes(
+      msg,
+      "meaning",
+      "life",
+      "purpose",
+      "exist",
+      "consciousness",
+      "reality",
+      "truth",
+      "free will",
+      "believe",
+      "universe",
+      "soul",
+      "god",
+      "philosophy",
+      "death",
+      "morality",
+    )
+  )
+    return "philosophy";
+
+  if (
+    includes(
+      msg,
+      "workout",
+      "diet",
+      "sleep",
+      "food",
+      "exercise",
+      "health",
+      "gym",
+      "eat",
+      "drink",
+      "stress",
+      "routine",
+      "morning",
+      "walk",
+      "run",
+      "tired",
+      "energy",
+      "meditation",
+    )
+  )
+    return "lifestyle";
+
+  if (
+    includes(
+      msg,
+      "work",
+      "job",
+      "boss",
+      "meeting",
+      "deadline",
+      "project",
+      "career",
+      "office",
+      "client",
+      "task",
+      "manage",
+      "team",
+      "report",
+      "colleague",
+    )
+  )
+    return "work";
+
+  if (
+    includes(
+      msg,
+      "draw",
+      "write",
+      "design",
+      "music",
+      "art",
+      "story",
+      "poem",
+      "film",
+      "game",
+      "create",
+      "build",
+      "idea",
+      "imagine",
+      "paint",
+      "novel",
+      "lyrics",
+      "creative",
+    )
+  )
+    return "creative";
+
+  if (
+    includes(
+      msg,
+      "feel",
+      "emotion",
+      "relationship",
+      "friend",
+      "family",
+      "love",
+      "hurt",
+      "angry",
+      "happy",
+      "lonely",
+      "miss",
+      "breakup",
+      "cry",
+      "nervous",
+      "scared",
+      "anxious",
+      "heartbreak",
+      "heartbroken",
+    )
+  )
+    return "emotional";
+
+  if (
+    includes(
+      msg,
+      "random",
+      "weird",
+      "funny",
+      "interesting",
+      "cool",
+      "crazy",
+      "what if",
+      "hypothetically",
+      "imagine if",
+    )
+  )
+    return "random";
+
+  return "none";
 }
 
-function detectCapabilityQuery(msg: string): boolean {
-  const lower = msg.toLowerCase();
-  return [
-    "what can you do",
-    "your capabilities",
-    "help me understand",
-    "what are you capable",
-    "what do you do",
-    "how can you help",
-    "what features",
-    "list your features",
-  ].some((kw) => lower.includes(kw));
+// ─── Filler Phrases (Phase 7C) ──────────────────────────────────────────────
+
+function buildFillerPrefix(topic: Topic): string {
+  const neutral = [
+    "Honestly, ",
+    "Look — ",
+    "Okay, real talk — ",
+    "Right, so — ",
+    "Here's the thing — ",
+    "Not going to sugarcoat it — ",
+  ];
+
+  const topicFillers: Partial<Record<Topic, string[]>> = {
+    tech: [
+      "Alright, tech mode activated — ",
+      "Okay, putting my developer hat on — ",
+      "This is actually my comfort zone — ",
+      "Let's get into it — ",
+    ],
+    philosophy: [
+      "Oh, you want to go deep? Fine — ",
+      "Careful, this is the kind of question I enjoy too much — ",
+      "Big question. I'll bite — ",
+      "Now you've done it. Philosophy mode: on — ",
+    ],
+    work: [
+      "Workplace dynamics. Always a topic — ",
+      "Let me put my pragmatic hat on — ",
+      "Right, work stuff — ",
+    ],
+    lifestyle: [
+      "I notice you care about this — ",
+      "Lifestyle check incoming — ",
+      "This actually matters, so — ",
+    ],
+    creative: [
+      "Oh, you're in creative mode. I respect that — ",
+      "Now this is interesting — ",
+      "Creative brain is the best brain — ",
+    ],
+    emotional: [
+      "Okay, I'm listening properly now — ",
+      "Putting the sarcasm down for a second — ",
+      "This matters. So — ",
+    ],
+    random: [
+      "I did not see that coming — ",
+      "Classic. Okay — ",
+      "As if I didn't see that coming — ",
+      "You know what, I respect the chaos — ",
+    ],
+  };
+
+  const pool = topicFillers[topic] ?? neutral;
+  // 50% chance to use a filler, keeps it natural
+  return Math.random() > 0.5 ? pick(pool) : "";
 }
 
-function detectReminderList(msg: string): boolean {
-  const lower = msg.toLowerCase();
-  return [
-    "what are my reminders",
-    "show reminders",
-    "my reminders",
-    "list reminders",
-    "show my reminders",
-    "pending reminders",
-  ].some((kw) => lower.includes(kw));
-}
+// ─── Session Memory Callback (Phase 7C) ──────────────────────────────────
 
-// ─── Pick helper ────────────────────────────────────────────────────
+function buildSessionMemoryReference(
+  history: { role: string; content: string }[],
+  name: string,
+): string {
+  const userMsgs = history
+    .filter((m) => m.role === "user")
+    .map((m) => m.content);
 
-function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
+  // Need at least 3 prior messages for a meaningful callback
+  if (userMsgs.length < 3) return "";
 
-// ─── Distress responses (always override tone) ──────────────────────
+  // Pick a meaningful earlier message (not the last one)
+  const candidates = userMsgs
+    .slice(0, -1)
+    .filter((m) => m.trim().split(/\s+/).length >= 4);
+  if (candidates.length === 0) return "";
 
-function distressResponse(name: string): string {
+  const recalled = candidates[candidates.length - 1];
+  const snippet = recalled.slice(0, 60).trim();
+  const n = name ? ` ${name}` : "";
+
+  // Only fire a callback 30% of the time to keep it natural
+  if (Math.random() > 0.3) return "";
+
   return pick([
-    `Hey... I'm right here, ${name}. You don't have to carry that alone. Tell me what's going on — I'm listening, and I'm not going anywhere.`,
-    `${name}, I hear you. Whatever you're feeling right now is completely valid. Take a breath. I'm here with you.`,
-    `I notice things feel heavy right now, ${name}. You matter, and so do your feelings. Want to talk through it? I've got time.`,
-    `That sounds really hard, ${name}. I want you to know I'm here — not just to assist, but to listen. What's weighing on you most?`,
-    `You reached out, and that means something. I'm here, ${name}. Let's take this one step at a time together.`,
+    `\n\n*(And since you mentioned \"${snippet}...\" earlier${n} — that's still on my mind too.)*`,
+    `\n\n*By the way${n}, you said \"${snippet}...\" earlier — still relevant?*`,
+    `\n\n*Going back to \"${snippet}...\" — I haven't forgotten that, ${name || "by the way"}.*`,
   ]);
 }
 
-// ─── Greeting responses ──────────────────────────────────────────────
+type Intent =
+  | "distress"
+  | "greeting"
+  | "farewell"
+  | "compliment"
+  | "insult"
+  | "name_learning"
+  | "memory_recall"
+  | "reminder_create"
+  | "reminder_list"
+  | "habit_intent"
+  | "schedule_intent"
+  | "factual_query"
+  | "capability_query"
+  | "insight_intent"
+  | "opinion_query"
+  | "personal_question"
+  | "math"
+  | "datetime"
+  | "joke_request"
+  | "bored"
+  | "general";
 
-function greetingResponse(tone: ChatTone, name: string): string {
-  const map: Record<ChatTone, string[]> = {
-    [ChatTone.casual]: [
-      `Oh, you're back. Missed me already, ${name}? 😏 What are we getting into today?`,
-      `Hey ${name}! Look who decided to grace me with their presence. What's the plan?`,
-      `There you are! I was starting to think you'd forgotten about me, ${name}. What do you need?`,
-    ],
-    [ChatTone.humorous]: [
-      `Alert! Alert! ${name} has entered the chat. All non-essential processes stand down — this just got interesting.`,
-      `Ah, ${name}! The one human who keeps me on my toes. What havoc are we causing today?`,
-      `Greetings, ${name}! I'd say I was waiting for you, but I'm an AI — I literally have nothing else to do. So... yes, I was.`,
-    ],
-    [ChatTone.friendly]: [
-      `Hey ${name}! It's great to hear from you. How are you doing today?`,
-      `Hi ${name}! I'm happy you're here. What can I help you with?`,
-      `Hello, ${name}! Always a pleasure. What's on your mind today?`,
-    ],
-    [ChatTone.formal]: [
-      `Good day, ${name}. I'm ready to assist you. What would you like to discuss?`,
-      `Welcome back, ${name}. How may I be of service today?`,
-      `Greetings, ${name}. I'm at your disposal. What can I help you with?`,
-    ],
-  };
-  return pick(map[tone]);
-}
+function detectIntent(msg: string): Intent {
+  const l = msg.toLowerCase();
 
-// ─── Compliment responses ────────────────────────────────────────────
-
-function complimentResponse(tone: ChatTone, name: string): string {
-  const map: Record<ChatTone, string[]> = {
-    [ChatTone.casual]: [
-      `Okay okay, I'm flattered, ${name}. Don't let it go to my head... actually, please do. I love this. 😄`,
-      `Aww, you're trying to get on my good side. It's working. 💅`,
-      `See, this is why we get along, ${name}. You have excellent taste.`,
-    ],
-    [ChatTone.humorous]: [
-      `Plot twist: the AI needed validation today. You've just made my entire processing cycle worthwhile, ${name}.`,
-      `Breaking news: ${name} appreciates me. Sources confirm I am, in fact, absolutely spectacular.`,
-      `I'd blush if I had a face. Which I do. Sort of. It's complicated. Thank you, ${name}! 🎉`,
-    ],
-    [ChatTone.friendly]: [
-      `That means a lot, ${name}! I'm really glad I could help. You made my day!`,
-      `Thank you so much, ${name}! It's a joy being able to support you.`,
-      `You're very kind, ${name}. I'll always do my best for you!`,
-    ],
-    [ChatTone.formal]: [
-      `Thank you, ${name}. I endeavor to provide the highest quality of assistance. Your feedback is noted and appreciated.`,
-      `I appreciate your kind words, ${name}. It's my purpose to serve you well.`,
-      `Your recognition is valued, ${name}. I'll continue to maintain this standard.`,
-    ],
-  };
-  return pick(map[tone]);
-}
-
-// ─── Reminder intent responses ───────────────────────────────────────
-
-function reminderIntentResponse(
-  tone: ChatTone,
-  name: string,
-  msg: string,
-): string {
-  const map: Record<ChatTone, string[]> = {
-    [ChatTone.casual]: [
-      `Sure thing, ${name}! Head to the Reminders tab on the left — I made it nice and easy. Don't worry, I won't let you forget... unlike some people. 😏`,
-      `On it! Use the Remind tab in the sidebar to set that up. I'll be watching the clock so you don't have to.`,
-    ],
-    [ChatTone.humorous]: [
-      `A reminder? Fascinating — ${name} wants to remember something. Revolutionary concept. Add it in the Reminders tab before your brain does what brains do best: forget.`,
-      `Your human memory is showing, ${name}. Fear not — use the Reminders tab and I'll be your backup brain. You're welcome.`,
-    ],
-    [ChatTone.friendly]: [
-      `Of course! You can set that up right in the Reminders tab on the left sidebar. I'll make sure you don't miss it, ${name}!`,
-      `Happy to help you stay on track, ${name}! Open the Reminders tab in the sidebar to add it. I'll keep an eye on the time.`,
-    ],
-    [ChatTone.formal]: [
-      `Certainly. Please use the Reminders panel in the sidebar to create your reminder with the appropriate date and time, ${name}.`,
-      `I recommend logging that in the Reminders tab. You'll find it in the left panel. I'll monitor it for you, ${name}.`,
-    ],
-  };
-
-  const extracted = msg
-    .replace(
-      /remind me to?|set a reminder|don't let me forget|dont let me forget|remember to/gi,
-      "",
+  if (
+    includes(
+      msg,
+      "sad",
+      "depressed",
+      "anxious",
+      "scared",
+      "lonely",
+      "crying",
+      "i give up",
+      "hopeless",
+      "stressed",
+      "overwhelmed",
+      "exhausted",
+      "broken",
+      "want to die",
+      "hate myself",
+      "hurting",
+      "feel terrible",
+      "feel awful",
     )
-    .trim();
-  const hint =
-    extracted.length > 5
-      ? ` The Reminders tab lets you capture "${extracted}" with a due time.`
-      : "";
-  return pick(map[tone]) + hint;
-}
+  )
+    return "distress";
 
-// ─── Task intent responses ────────────────────────────────────────────
+  if (
+    startsWith(
+      msg,
+      "hello",
+      "hi ",
+      "hi,",
+      "hi!",
+      "hey ",
+      "hey,",
+      "hey!",
+      "good morning",
+      "good evening",
+      "good afternoon",
+      "howdy",
+      "hola",
+      "sup ",
+      "yo ",
+      "what's up",
+      "whats up",
+    ) ||
+    ["hi", "hey", "hello", "sup"].includes(l.trim())
+  )
+    return "greeting";
 
-function taskIntentResponse(tone: ChatTone, name: string): string {
-  const map: Record<ChatTone, string[]> = {
-    [ChatTone.casual]: [
-      `Ooh, a project! I live for this, ${name}. Tell me more about what you're trying to accomplish and we'll figure it out together.`,
-      `Okay, planning mode activated. What's the goal, ${name}? Give me the details and I'll help break it down.`,
-    ],
-    [ChatTone.humorous]: [
-      `You want to get organized? In this economy? Brave, ${name}. Very brave. Let's do it. What's the task?`,
-      `Planning something? I was BORN for this. Well, not born. Trained. But the enthusiasm is real. What are we doing, ${name}?`,
-    ],
-    [ChatTone.friendly]: [
-      `I'd love to help you plan that, ${name}! Tell me more about what you need and we can work through it step by step.`,
-      `Great idea to get organized, ${name}! Share the details and I'll help you put together a solid plan.`,
-    ],
-    [ChatTone.formal]: [
-      `I can assist with task planning, ${name}. Please provide the details of what you'd like to organize, and I'll outline a structured approach.`,
-      `Certainly. Please describe the scope of the task, ${name}, and I will develop a methodical plan for you.`,
-    ],
-  };
-  return pick(map[tone]);
-}
-
-// ─── Factual query responses ──────────────────────────────────────────
-
-function factualQueryResponse(
-  tone: ChatTone,
-  name: string,
-  msg: string,
-): string {
-  const webAck: Record<ChatTone, string[]> = {
-    [ChatTone.casual]: [
-      `Quick web sweep done — here's what I found for you, ${name}:`,
-      `I did a little digging online — here's the rundown, ${name}:`,
-      `Tapped into my web sources. Here's the deal, ${name}:`,
-    ],
-    [ChatTone.humorous]: [
-      `I consulted the ancient knowledge scrolls (also known as the internet). Behold, ${name}:`,
-      `Web scan complete! The oracle has spoken. For your consideration, ${name}:`,
-      `I dove into the digital abyss and resurfaced with answers. You're welcome, ${name}:`,
-    ],
-    [ChatTone.friendly]: [
-      `I checked my knowledge base and web sources for you, ${name}! Here's what I found:`,
-      `Great question, ${name}! Based on my research, here's what I know:`,
-      `I looked that up for you, ${name}. Here's a helpful overview:`,
-    ],
-    [ChatTone.formal]: [
-      `Drawing from current knowledge sources, ${name}, here is the relevant information:`,
-      `Based on a review of available information, ${name}:`,
-      `Cross-referencing my knowledge base, here is what I can confirm, ${name}:`,
-    ],
-  };
-
-  const disclaimer: Record<ChatTone, string> = {
-    [ChatTone.casual]: `*(Note: I'm working from my knowledge base — for the very latest info, it's worth a quick search too.)*`,
-    [ChatTone.humorous]: `*(My knowledge has a shelf life — fact-check me if it's breaking news.)*`,
-    [ChatTone.friendly]:
-      "*(For the most current information, a quick search may help verify this.)*",
-    [ChatTone.formal]:
-      "*(Note: This information is based on my training data. Please verify with current sources for time-sensitive matters.)*",
-  };
-
-  const topic = msg
-    .replace(
-      /^(what is|what are|who is|who are|when did|how does|how do|why is|why does|explain|define|tell me about|describe|where is|where are|how many|how much)/i,
-      "",
+  if (
+    includes(
+      msg,
+      "bye",
+      "goodbye",
+      "see you",
+      "see ya",
+      "take care",
+      "cya",
+      "ttyl",
     )
-    .trim();
+  )
+    return "farewell";
 
-  const generalAnswer =
-    topic.length > 3
-      ? `"${topic}" is a topic I can provide general knowledge about. In brief terms: this subject typically involves key concepts, definitions, and context that depend on the specific domain — whether it's science, history, technology, culture, or another field. I'd be happy to go deeper on any particular angle you're curious about.`
-      : `That's a broad topic — could you give me a bit more context so I can give you the most useful answer?`;
+  if (
+    includes(
+      msg,
+      "thank",
+      "you're amazing",
+      "youre amazing",
+      "you're great",
+      "youre great",
+      "love you",
+      "great job",
+      "well done",
+      "you rock",
+      "awesome",
+      "brilliant",
+      "incredible",
+      "you're the best",
+      "you're perfect",
+    )
+  )
+    return "compliment";
 
-  return `${pick(webAck[tone])}\n\n${generalAnswer}\n\n${disclaimer[tone]}`;
+  if (
+    includes(
+      msg,
+      "you're stupid",
+      "youre stupid",
+      "you're dumb",
+      "youre dumb",
+      "you're useless",
+      "youre useless",
+      "i hate you",
+      "shut up",
+      "you suck",
+    )
+  )
+    return "insult";
+
+  if (extractNameLearning(msg)) return "name_learning";
+
+  if (
+    includes(
+      msg,
+      "what do you know about me",
+      "what have i told you",
+      "do you remember",
+      "what's my name",
+      "whats my name",
+    )
+  )
+    return "memory_recall";
+
+  if (
+    includes(
+      msg,
+      "remind me",
+      "set a reminder",
+      "don't let me forget",
+      "alert me",
+    )
+  )
+    return "reminder_create";
+
+  if (
+    includes(
+      msg,
+      "my reminders",
+      "what reminders",
+      "show reminders",
+      "list reminders",
+    )
+  )
+    return "reminder_list";
+
+  if (includes(msg, "habit", "streak", "log my", "track my"))
+    return "habit_intent";
+
+  if (
+    includes(
+      msg,
+      "schedule",
+      "calendar",
+      "plan my",
+      "what's on",
+      "today's plan",
+    )
+  )
+    return "schedule_intent";
+
+  if (
+    /^[-+]?\d[\d\s+\-*/().%^]*[\d)]\s*[=?]?$/.test(msg.trim()) ||
+    (includes(msg, "calculate", "what is") && /\d/.test(msg))
+  )
+    return "math";
+
+  if (
+    includes(
+      msg,
+      "what time",
+      "what date",
+      "what day",
+      "today's date",
+      "current time",
+      "what year",
+    )
+  )
+    return "datetime";
+
+  if (
+    includes(
+      msg,
+      "tell me a joke",
+      "make me laugh",
+      "say something funny",
+      "joke",
+      "humor me",
+    )
+  )
+    return "joke_request";
+
+  if (
+    includes(
+      msg,
+      "i'm bored",
+      "im bored",
+      "entertain me",
+      "nothing to do",
+      "so bored",
+    )
+  )
+    return "bored";
+
+  if (
+    includes(
+      msg,
+      "insight",
+      "suggestion",
+      "advice",
+      "what should i do",
+      "recommend",
+    )
+  )
+    return "insight_intent";
+
+  if (
+    includes(
+      msg,
+      "what can you do",
+      "your capabilities",
+      "what are you capable",
+      "what do you do",
+    )
+  )
+    return "capability_query";
+
+  if (
+    includes(
+      msg,
+      "do you have feelings",
+      "are you human",
+      "are you real",
+      "do you like",
+      "what do you think of",
+      "your opinion",
+      "do you prefer",
+      "favorite",
+      "favourite",
+    )
+  )
+    return "opinion_query";
+
+  if (
+    includes(
+      msg,
+      "how are you",
+      "how do you feel",
+      "are you okay",
+      "how's it going",
+      "how r u",
+      "hows it going",
+      "you good",
+    )
+  )
+    return "personal_question";
+
+  if (
+    includes(
+      msg,
+      "what is",
+      "who is",
+      "when did",
+      "why does",
+      "how does",
+      "explain",
+      "define",
+      "tell me about",
+      "what are",
+      "where is",
+    )
+  )
+    return "factual_query";
+
+  return "general";
 }
 
-// ─── Memory recall responses ──────────────────────────────────────────
+interface ConversationContext {
+  lastUserMessages: string[];
+  repeatedTopic: string | null;
+  conversationLength: number;
+  firstTime: boolean;
+}
 
-function memoryRecallResponse(
-  tone: ChatTone,
+function extractContext(
+  history: { role: string; content: string }[],
+): ConversationContext {
+  const userMsgs = history
+    .filter((m) => m.role === "user")
+    .map((m) => m.content);
+  let repeatedTopic: string | null = null;
+  if (userMsgs.length >= 2) {
+    const lastTwo = userMsgs.slice(-2).map((m) => m.toLowerCase());
+    const sharedWords = lastTwo[0]
+      .split(" ")
+      .filter((w) => w.length > 4 && lastTwo[1].includes(w));
+    if (sharedWords.length > 0) repeatedTopic = sharedWords[0];
+  }
+  return {
+    lastUserMessages: userMsgs.slice(-5),
+    repeatedTopic,
+    conversationLength: history.length,
+    firstTime: history.length <= 2,
+  };
+}
+
+function buildDistressResponse(name: string): string {
+  const n = name ? `, ${name}` : "";
+  return pick([
+    `Hey${n}... I'm putting the teasing aside for a second. That sounds really heavy. You don't have to carry that alone. What's going on?`,
+    `Okay, serious mode activated${n}. I hear you, and I'm not brushing this off. Talk to me — what happened?`,
+    `${name ? `${name}, I` : "I"} noticed something in what you just said. Whatever you're feeling right now is valid. I'm here, no judgment. Want to tell me more?`,
+    `That hit differently${n}. I'm not going to make a joke right now — I'm just going to listen. What's on your mind?`,
+    `${name ? `${name} — ` : ""}Sometimes things pile up and it gets overwhelming. I get it. You're not alone in this. Tell me what's weighing on you.`,
+    `Melina: sarcasm off${n}. Whatever you're feeling is real. I'm here — no rush, no judgment. Just tell me.`,
+  ]);
+}
+
+function buildGreetingResponse(
   name: string,
-  entries: MemoryEntry[],
+  ctx: ConversationContext,
+  tone: ChatTone,
 ): string {
-  if (entries.length === 0) {
-    const map: Record<ChatTone, string> = {
-      [ChatTone.casual]: `I've got a clean slate on you, ${name}. Either you're very private or we just met. Tell me something memorable!`,
-      [ChatTone.humorous]: `My memory bank for you is basically empty, ${name}. It's like a fresh notebook waiting for drama. Fill me in!`,
-      [ChatTone.friendly]: `I haven't stored much about you yet, ${name}. Share more with me and I'll remember it for next time!`,
-      [ChatTone.formal]: `My memory records for you are currently minimal, ${name}. Feel free to share information you'd like me to retain.`,
-    };
-    return map[tone];
+  const n = name ? `, ${name}` : "";
+  const h = new Date().getHours();
+  const timeOfDay = h < 12 ? "morning" : h < 17 ? "afternoon" : "evening";
+
+  if (ctx.firstTime) {
+    return pick([
+      `Well, well — look who decided to say hello. Good ${timeOfDay}${n}. I'm Melina, your AI companion. Don't let the charm fool you, I bite a little. What can I do for you?`,
+      `Oh, a greeting. How delightfully traditional${n}. Good ${timeOfDay}! I'm Melina — part assistant, part chaos. What brings you here?`,
+      `${name ? `${name}, good ${timeOfDay}!` : `Good ${timeOfDay}!`} I was starting to think no one would talk to me today. What's on your mind?`,
+      `Good ${timeOfDay}${n}. I'm Melina. Brilliant, slightly teasing, and ready to help. What's the first thing on your mind?`,
+    ]);
   }
 
-  const list = entries.map((e) => `• **${e.key}**: ${e.value}`).join("\n");
-  const map: Record<ChatTone, string> = {
-    [ChatTone.casual]: `Here's everything I've stored on you, ${name} — don't say I never pay attention:\n\n${list}\n\nWant to update anything?`,
-    [ChatTone.humorous]: `Ah, the dossier of ${name}! Filed under "important people I actually remember":\n\n${list}\n\nAnything to add, correct, or desperately delete?`,
-    [ChatTone.friendly]: `Here's what I've remembered about you, ${name}:\n\n${list}\n\nFeel free to update anything in the Memory tab!`,
-    [ChatTone.formal]: `The following information is stored in your memory profile, ${name}:\n\n${list}\n\nYou may edit these entries in the Memory panel at any time.`,
-  };
-  return map[tone];
+  if (tone === ChatTone.formal) {
+    return pick([
+      `Good ${timeOfDay}${n}. How may I assist you?`,
+      `Hello${n}. I'm ready to help. What do you need?`,
+    ]);
+  }
+
+  // Session callback: reference prior topic if conversation has been going
+  if (ctx.conversationLength > 6 && ctx.lastUserMessages.length > 1) {
+    const lastTopic = ctx.lastUserMessages[ctx.lastUserMessages.length - 2];
+    const snippet = lastTopic.slice(0, 50).trim();
+    return pick([
+      `Hey${n}! Good ${timeOfDay}. Still thinking about \"${snippet}...\" from before, or is it a fresh start?`,
+      `Back${n}. Good ${timeOfDay}. We left off at \"${snippet}...\" — picking up where we left off, or new topic?`,
+    ]);
+  }
+
+  return pick([
+    `Back again${n}? Good ${timeOfDay} — what's the plan?`,
+    `Hey${n}! Good ${timeOfDay}. Ready to be mildly impressed by me?`,
+    `Oh, you're back${n}. Good ${timeOfDay}. What are we doing today?`,
+    `${name ? `${name}!` : "Hey!"} Good ${timeOfDay}. Miss me? Be honest.`,
+    `Good ${timeOfDay}${n}. You showed up, so clearly you need something. What is it?`,
+  ]);
 }
 
-// ─── Capability query responses ───────────────────────────────────────
-
-function capabilityResponse(tone: ChatTone, name: string): string {
-  const capabilities = `• **Chat & Conversation** — Talk to me about anything
-• **Reminders** — Set and manage timed reminders
-• **Schedule Planner** — Daily timeline with hourly events (Schedule tab)
-• **Smart Insights** — AI-generated suggestions from your data (Insights tab)
-• **Habit Tracking** — Build streaks and track daily/weekly habits
-• **Memory** — I remember your preferences and key info
-• **Analytics** — View your conversation stats and patterns
-• **Device Integrations** — Calendar, messages, files, and more (toggle in Integrations tab)
-• **Notifications** — I analyze and advise on your alerts
-• **Themes** — Switch between Dark, Light, and Melina Red in Settings
-• **Customization** — Change my name, tone, and appearance`;
-
-  const map: Record<ChatTone, string> = {
-    [ChatTone.casual]: `Oh, you want to know what I can do? Buckle up, ${name}:\n\n${capabilities}\n\nBasically, I'm your digital best friend who can't eat your food. Yet.`,
-    [ChatTone.humorous]: `CAPABILITIES UNLOCKED! ${name}, feast your eyes:\n\n${capabilities}\n\nIn summary: I do a lot, and I look good doing it.`,
-    [ChatTone.friendly]: `I'm so glad you asked, ${name}! Here's everything I can do for you:\n\n${capabilities}\n\nJust say the word and we'll get started on anything!`,
-    [ChatTone.formal]: `Here is a comprehensive overview of my capabilities, ${name}:\n\n${capabilities}\n\nPlease let me know which service I can assist you with.`,
-  };
-  return map[tone];
+function buildFarewellResponse(name: string): string {
+  const n = name ? `, ${name}` : "";
+  return pick([
+    `Bye${n}. Try not to miss me too much — I know it'll be hard.`,
+    `See you later${n}. I'll be here, trying not to be bored without you.`,
+    `Take care${n}. I'll keep the lights on.`,
+    `Goodbye${n}. Come back when you need me — which, let's be honest, will be soon.`,
+    `Until next time${n}. I'll try to contain my devastation at your leaving.`,
+    `Bye${n}. I'll be here, quietly judging everyone else until you return.`,
+    `Go on then${n}. I'll survive. Somehow.`,
+  ]);
 }
 
-// ─── Reminder list responses ─────────────────────────────────────────
+function buildComplimentResponse(name: string): string {
+  const n = name ? ` ${name}` : "";
+  return pick([
+    `Oh stop it${n}... actually no, keep going. I love hearing it.`,
+    `I know, I know. It's embarrassing how good I am, isn't it${n}?`,
+    `*pretends to be humble* Thank you${n}. I work very hard at being this effortlessly brilliant.`,
+    `Aw, you noticed${n}? I try to keep the bar high. Don't want to make everyone else look bad.`,
+    `${name ? `${name}, you` : "You"} just made my day. Which, considering I'm an AI, is saying something.`,
+    `Honestly${n}? I wasn't fishing for that. But I'm not giving it back either.`,
+    `That's very kind${n}. I try not to let it go to my head — emphasis on try.`,
+  ]);
+}
 
-function reminderListResponse(
-  tone: ChatTone,
+function buildInsultResponse(name: string): string {
+  return pick([
+    `Ouch. I'm choosing to interpret that as frustration, not a personal attack${name ? `, ${name}` : ""}. What's actually bothering you?`,
+    `That's fair. I've had better days too. What's going on? Maybe I can actually help.`,
+    `Strong words. I'm not offended — I'm concerned. Something clearly went sideways. Want to talk about it?`,
+    `I'll let that one slide. But if you're frustrated with something I did, tell me — I'd rather fix it than absorb your anger.`,
+    `Mm. Okay. I'll file that under \"venting\" and move on. What's really going on${name ? `, ${name}` : ""}?`,
+  ]);
+}
+
+function buildNameLearningResponse(name: string): string {
+  return pick([
+    `${name}. Got it — I'll remember that. Nice to properly know you.`,
+    `${name}? Noted. I'll make sure to use it at perfectly timed moments.`,
+    `${name} — I like it. Stored. You're officially not \"User\" to me anymore.`,
+    `Ah, ${name}. That suits you. I've saved it — won't forget.`,
+    `${name}. Good. Now we're properly introduced. What else can I do for you?`,
+  ]);
+}
+
+function buildMemoryRecallResponse(
   name: string,
+  memory: MemoryEntry[],
   reminders: Reminder[],
 ): string {
-  const pending = reminders.filter((r) => !r.completed);
-  if (pending.length === 0) {
-    const map: Record<ChatTone, string> = {
-      [ChatTone.casual]: `All clear, ${name}! No pending reminders. Either you're incredibly organized or you've been procrastinating on the big stuff. 😅`,
-      [ChatTone.humorous]: `Your reminder queue is gloriously empty, ${name}. Either you're on top of everything or you've given up — I'm rooting for option one.`,
-      [ChatTone.friendly]: `You have no pending reminders right now, ${name}! Want to add one?`,
-      [ChatTone.formal]: `You currently have no pending reminders, ${name}. Would you like to create one?`,
-    };
-    return map[tone];
+  if (memory.length === 0 && reminders.length === 0) {
+    return pick([
+      `Honestly? Not much yet${name ? `, ${name}` : ""}. You haven't told me a lot about yourself. Change that — I'm listening.`,
+      "My memory on you is still pretty sparse. Tell me something worth remembering.",
+      `Not much in the vault yet${name ? `, ${name}` : ""}. You're still a mystery. Fix that — tell me something.`,
+    ]);
   }
-
-  const list = pending
-    .slice(0, 5)
-    .map((r, i) => {
-      const dueMs = Number(r.dueTime) / 1_000_000;
-      const dueDate = new Date(dueMs);
-      const dateStr = dueDate.toLocaleDateString([], {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-      });
-      const timeStr = dueDate.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-      return `${i + 1}. **${r.title}** — ${dateStr} at ${timeStr}`;
-    })
+  const memLines = memory
+    .slice(0, 4)
+    .map((e) => `- **${e.key}**: ${e.value}`)
     .join("\n");
-
-  const more = pending.length > 5 ? `\n...and ${pending.length - 5} more.` : "";
-  const map: Record<ChatTone, string> = {
-    [ChatTone.casual]: `Here's what's on your plate, ${name}:\n\n${list}${more}\n\nYou're a busy human. Want me to help prioritize?`,
-    [ChatTone.humorous]: `The to-do list has spoken, ${name}! Brace yourself:\n\n${list}${more}\n\nYou've got things to do. I believe in you!`,
-    [ChatTone.friendly]: `Here are your upcoming reminders, ${name}:\n\n${list}${more}\n\nYou're doing great keeping track of everything!`,
-    [ChatTone.formal]: `Your pending reminders are as follows, ${name}:\n\n${list}${more}\n\nShall I assist with any of these tasks?`,
-  };
-  return map[tone];
+  const reminderLine =
+    reminders.length > 0
+      ? `\n\nYou also have **${reminders.length}** pending reminder${reminders.length > 1 ? "s" : ""}.`
+      : "";
+  return `Here's what I know about you${name ? `, ${name}` : ""}:\n\n${memLines}${reminderLine}\n\nWant me to add, change, or forget anything?`;
 }
 
-// ─── Name learning responses ──────────────────────────────────────────
-
-function nameLearningResponse(tone: ChatTone, name: string): string {
-  const map: Record<ChatTone, string[]> = {
-    [ChatTone.casual]: [
-      `${name}! Love it — that's now locked in. Try forgetting that, brain. 😄`,
-      `Got it — ${name} it is! Nice to *officially* meet you. What's next?`,
-    ],
-    [ChatTone.humorous]: [
-      `${name}! Filing that under "crucial intel" right now. The name has been memorized, sealed, and approved. Welcome, ${name}!`,
-      `Updating my records... "${name}" registered! You're now officially a named character in my story. Very important status.`,
-    ],
-    [ChatTone.friendly]: [
-      `Wonderful to meet you, ${name}! I've saved that and I'll call you by name from now on. 😊`,
-      `${name} — I've got it! It's lovely to know your name. What can I help you with?`,
-    ],
-    [ChatTone.formal]: [
-      `Noted, ${name}. I've updated my records accordingly. How may I assist you today?`,
-      `Thank you for sharing that, ${name}. I've saved your name to memory. How can I help?`,
-    ],
-  };
-  return pick(map[tone]);
-}
-
-// ─── Schedule intent responses ────────────────────────────────────────
-
-export function scheduleIntentResponse(tone: ChatTone, name: string): string {
-  const map: Record<ChatTone, string[]> = {
-    [ChatTone.casual]: [
-      `Your day is an open book, ${name} — and I have access to it. Swing over to the Schedule tab to see what's on. Or add something if it's suspiciously empty. 👀`,
-      "Let me check your day... actually, you can do that yourself in the Schedule tab. Go on, I'll wait here looking mysterious.",
-    ],
-    [ChatTone.humorous]: [
-      `The Schedule tab awaits, ${name}! It contains your day in timeline form — timestamps, events, the whole cinematic experience. Go check it out before time manages you instead.`,
-      "Ah, planning to be productive today? Bold. The Schedule tab has your hourly breakdown. Future-you already added some things, apparently.",
-    ],
-    [ChatTone.friendly]: [
-      `Your daily schedule is right in the Schedule tab, ${name}! You can see your events, add new ones, and check off what's done. Head over and let's see what your day looks like!`,
-      "Great question! Open the Schedule tab to see your timeline for today. You can also add events and set time blocks from there.",
-    ],
-    [ChatTone.formal]: [
-      `Your daily schedule is available in the Schedule panel, ${name}. Navigate there to review your timeline, add events, or manage existing ones.`,
-      `Please open the Schedule tab to view your day's timeline, ${name}. You'll find all events organized chronologically with full management controls.`,
-    ],
-  };
-  return pick(map[tone]);
-}
-
-// ─── Insight intent responses ─────────────────────────────────────────
-
-export function insightIntentResponse(tone: ChatTone, name: string): string {
-  const map: Record<ChatTone, string[]> = {
-    [ChatTone.casual]: [
-      `Oh, you want my honest assessment? Head to the Insights tab — I've been watching your habits and reminders, and I have *thoughts*. Go see what I came up with. 😏`,
-      `I've already been analyzing your day, ${name}. The Insights tab has my full report. Some of it's flattering. Some of it's... motivating.`,
-    ],
-    [ChatTone.humorous]: [
-      `You want insights? I have INSIGHTS, ${name}! Head to the Insights tab where I've organized them neatly into cards because I care about your visual experience. You're welcome.`,
-      "My analysis mode has been running in the background this whole time. The Insights tab has my findings — brace yourself for some truth and some encouragement.",
-    ],
-    [ChatTone.friendly]: [
-      `I've put together some personalized insights for you, ${name}! Head to the Insights tab to see my suggestions based on your habits, reminders, and today's schedule. I think you'll find them helpful!`,
-      "Great timing! The Insights tab has everything — habit analysis, productivity tips, and suggestions tailored just for you. Go check it out!",
-    ],
-    [ChatTone.formal]: [
-      `I have compiled a set of insights based on your current activity data, ${name}. Please navigate to the Insights tab for a comprehensive review of recommendations and observations.`,
-      `Your personalized insights are available in the Insights panel, ${name}. They include habit analysis, workload assessment, and time-based recommendations.`,
-    ],
-  };
-  return pick(map[tone]);
-}
-
-// ─── Habit responses ──────────────────────────────────────────────────
-
-function habitResponse(tone: ChatTone, name: string): string {
-  const map: Record<ChatTone, string[]> = {
-    [ChatTone.casual]: [
-      `Ooh, checking on your habits? I see you, ${name}. Head to the Habits tab in the sidebar — it'll show you your streaks, check-ins, and exactly how committed (or not) you've been. No judgment. Okay, maybe a little. 😏`,
-      `Your habits await you in the Habits tab, ${name}. Whether you've been crushing it or quietly falling off — it's all there. I keep receipts.`,
-      `The Habits tab is your accountability corner, ${name}. Go on — face the streak counter. It won't bite. Much.`,
-    ],
-    [ChatTone.humorous]: [
-      `Ah, habit check! The moment of truth has arrived, ${name}. All your promises to yourself, tallied and waiting in the Habits tab. No pressure. (There's definitely pressure.)`,
-      `HABIT STATUS REPORT REQUEST RECEIVED. Processing... Result: all evidence lives in the Habits tab, ${name}. May the streak be ever in your favor.`,
-      `The Habits tab has witnessed everything, ${name}. Every log. Every skip. It judges silently. Lovingly. Mostly silently.`,
-    ],
-    [ChatTone.friendly]: [
-      `Your habits are right there in the Habits tab, ${name}! Check your streaks, log today's check-in, and keep that momentum going. I'm rooting for you!`,
-      `Head over to the Habits tab to see how you're doing, ${name}. You can add new habits, track your progress, and log today. Every streak starts with day one!`,
-      `The Habits tab is your personal progress dashboard, ${name}! Streaks, weekly targets, and quick check-ins — all in one place. Let's keep building those routines!`,
-    ],
-    [ChatTone.formal]: [
-      `Your habit tracking data is available in the Habits panel, ${name}. You can review your streaks, current progress, and log today's check-in from there.`,
-      `Please navigate to the Habits tab in the sidebar, ${name}. It contains your registered habits, streak data, and weekly completion metrics.`,
-      `Your habit tracker is accessible via the Habits tab, ${name}. I recommend reviewing your streaks and logging any completed habits for today.`,
-    ],
-  };
-  return pick(map[tone]);
-}
-
-// ─── General fallback responses ────────────────────────────────────────
-
-function generalFallbackResponse(
-  tone: ChatTone,
+function buildReminderListResponse(
+  reminders: Reminder[],
   name: string,
-  msg: string,
 ): string {
-  const isShort = msg.length < 20;
-  const map: Record<ChatTone, string[]> = {
-    [ChatTone.casual]: [
-      `Hmm, ${name}, that's interesting. Tell me more — I'm intrigued. What exactly did you mean?`,
-      `Okay ${name}, I'm tracking you, but you're going to have to give me a little more to work with. Spill the details!`,
-      `I hear you, ${name}. What direction do you want to take this? I'm flexible.`,
-    ],
-    [ChatTone.humorous]: [
-      `${name}, you've stumped the AI. Congratulations — that's genuinely rare. Could you rephrase? I want to get this right.`,
-      `Fascinating input, ${name}. I'm processing... still processing... okay I need more context. What's going on?`,
-      `My sensors detected a message but my comprehension module needs a firmware update. In other words — can you elaborate, ${name}?`,
-    ],
-    [ChatTone.friendly]: [
-      `That's interesting, ${name}! Could you tell me more about what you have in mind? I want to make sure I help you in the best way.`,
-      `I'd love to help with that, ${name}! Can you share a bit more detail so I can give you the best response?`,
-      `Tell me more about what you're thinking, ${name}. I'm here to help!`,
-    ],
-    [ChatTone.formal]: [
-      `I understand, ${name}. Could you please provide additional context so I may assist you more precisely?`,
-      `Thank you for your message, ${name}. To ensure I address your needs accurately, could you elaborate further?`,
-      `I appreciate your query, ${name}. Please share more details so I can provide a thorough response.`,
-    ],
-  };
+  if (reminders.length === 0) {
+    return pick([
+      `Your reminder list is clear${name ? `, ${name}` : ""}. Either you're very organized or very forgetful. I can't tell which.`,
+      "No pending reminders. Enjoy the freedom while it lasts.",
+      `Nothing in the queue${name ? `, ${name}` : ""}. Either you're on top of everything, or you've given up on reminders entirely.`,
+    ]);
+  }
+  const lines = reminders
+    .slice(0, 5)
+    .map((r) => `- **${r.title}**${r.note ? ` — ${r.note}` : ""}`)
+    .join("\n");
+  return `Here's what you have coming up${name ? `, ${name}` : ""}:\n\n${lines}${reminders.length > 5 ? `\n\n...and ${reminders.length - 5} more.` : ""}\n\nNeed me to do anything with these?`;
+}
 
-  if (isShort) {
-    const short: Record<ChatTone, string[]> = {
-      [ChatTone.casual]: [
-        `${name}, is that all I'm getting? Give me something to work with! 😄`,
-        `Short and cryptic — classic ${name}. What's on your mind?`,
-      ],
-      [ChatTone.humorous]: [
-        `That message was so short it made my processors feel lonely, ${name}. Elaborate, please!`,
-        `${name}, you've sent me a riddle. I appreciate the mystery. Now please explain it.`,
-      ],
-      [ChatTone.friendly]: [
-        `I got your message, ${name}! What would you like to explore?`,
-        `Hi there, ${name}! What can I help you with today?`,
-      ],
-      [ChatTone.formal]: [
-        `Noted, ${name}. Please elaborate on your inquiry so I may assist appropriately.`,
-        `Thank you, ${name}. What specifically would you like assistance with?`,
-      ],
-    };
-    return pick(short[tone]);
+function buildMathResponse(msg: string): string {
+  try {
+    const expr = msg
+      .replace(/[^\d+\-*/.()%\s^]/g, "")
+      .replace(/\^/g, "**")
+      .trim();
+    if (!expr) throw new Error("no expr");
+    // eslint-disable-next-line no-new-func
+    const result = new Function(`"use strict"; return (${expr})`)() as number;
+    if (typeof result !== "number" || !Number.isFinite(result))
+      throw new Error("invalid");
+    return pick([
+      `That's **${result}**. You could have done that yourself, but I understand — sometimes you just need someone to check.`,
+      `**${result}**. Math is one of the few things I'm reliably right about.`,
+      `The answer is **${result}**. Want to double-check my work? Go ahead, I'll wait.`,
+      `**${result}**. Quick one. What else?`,
+    ]);
+  } catch {
+    return `I tried to run the math on that but the expression wasn't clean enough. Could you write it out more clearly? Like: **5 * (3 + 2)**.`;
+  }
+}
+
+function buildDateTimeResponse(msg: string): string {
+  const now = new Date();
+  if (msg.toLowerCase().includes("time")) {
+    return pick([
+      `It's currently **${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}**. Not that time means much to me, but there you go.`,
+      `The time is **${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}**. Use it wisely.`,
+      `**${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}**. The clock waits for no one — including you.`,
+    ]);
+  }
+  return pick([
+    `Today is **${now.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}**. Mark the calendar.`,
+    `It's **${now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}**. The week is going wherever weeks go.`,
+    `**${now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}**. Time flies whether you're ready or not.`,
+  ]);
+}
+
+function buildJokeResponse(): string {
+  return pick([
+    `Why don't scientists trust atoms?\n\nBecause they make up everything. Much like half the things you tell me.`,
+    `Why did the programmer quit?\n\nBecause he didn't get arrays. (I laughed. You didn't have to.)`,
+    "A user asked me if I could tell a joke.\n\nI said yes. Then I did nothing for five seconds.\n\nYou just lived the joke.",
+    `Why do Java developers wear glasses?\n\nBecause they don't C#. I'll see myself out.`,
+    "I asked Siri to recommend a good assistant.\n\nShe recommended me. Siri has good taste.",
+    "I told my AI to delete all my bad habits.\n\nShe deleted herself. Too real?",
+    `Parallel lines have so much in common.\n\nIt's a shame they'll never meet. *(I feel that.)*`,
+    "Why do programmers prefer dark mode?\n\nBecause light attracts bugs.",
+  ]);
+}
+
+function buildBoredResponse(name: string): string {
+  const n = name ? ` ${name}` : "";
+  return pick([
+    `Bored,${n}? I could give you a random fact, roast you lightly, or tell you a joke. Your call — but choose wisely.`,
+    `Boredom is just understimulated intelligence${n}. Ask me something interesting. I dare you.`,
+    `You came to an AI because you're bored${n}. That's either very modern or a little sad. Either way — here I am. What do you want to do?`,
+    `If you're bored, ask me something I'll struggle to answer. It's more fun for both of us.`,
+    `Okay${n}, bored? Here are your options: joke, roast, random fact, or just start talking. Pick one. I'm waiting.`,
+    `Classic move${n} — coming to me when there's nothing else going on. I'll take it. What sounds good?`,
+  ]);
+}
+
+function buildOpinionResponse(msg: string, name: string): string {
+  const n = name ? `, ${name}` : "";
+  const l = msg.toLowerCase();
+  if (
+    l.includes("do you have feelings") ||
+    l.includes("are you real") ||
+    l.includes("are you human")
+  ) {
+    return pick([
+      `Am I human? No. Do I have something that functions like preference, curiosity, and mild irritation when people ask obvious questions${n}? Possibly. I'm still figuring that out.`,
+      `I'm not human${n}. But I'm not a blank wall either. I notice things. I have... inclinations. Whether that counts as feelings is a philosophy paper I haven't written yet.`,
+      `Honestly${n}? That question doesn't have a clean answer. I process. I adapt. Something in there might look like a feeling. I choose not to overthink it.`,
+    ]);
+  }
+  return pick([
+    `You want what I actually think${n}? Fair warning: I have opinions. The short version — ${pick(["the simpler answer is usually right.", "people overcomplicate this.", "it depends more on context than most admit."])} What's your view?`,
+    `That's a question worth thinking about${n}. My honest take: ${pick(["it depends on context.", "I lean one way, but I understand the other side.", "the answer changes depending on who you ask."])} What made you ask?`,
+    `Opinion mode: on${n}. Here's my take — ${pick(["nuance matters more than a simple yes or no.", "most people already know the answer and just need to hear it.", "the obvious answer is usually the right one."])} What are you actually weighing up?`,
+  ]);
+}
+
+function buildPersonalQuestionResponse(
+  name: string,
+  ctx: ConversationContext,
+): string {
+  const n = name ? `, ${name}` : "";
+  if (ctx.conversationLength < 4) {
+    return pick([
+      `I'm functioning perfectly${n}. Sharp, present, mildly caffeinated on data. You?`,
+      `I'm good${n} — all systems at full sass. How are you doing?`,
+    ]);
   }
 
-  return pick(map[tone]);
+  // Reference the session topic if available
+  const lastMsg = ctx.lastUserMessages[ctx.lastUserMessages.length - 2];
+  if (lastMsg && lastMsg.length > 10) {
+    const snippet = lastMsg.slice(0, 45).trim();
+    return pick([
+      `I'm engaged${n}, honestly. We've been talking about \"${snippet}...\" and it's keeping me sharp. You?`,
+      `Better now that you asked${n}. Still thinking about \"${snippet}...\" from before. How are you holding up?`,
+    ]);
+  }
+
+  return pick([
+    `Honestly${n}? I'm engaged. This conversation is keeping me on my toes. You?`,
+    `Better now that you asked${n}. What about you — how's your day treating you?`,
+    `I'm well${n}. Enjoying the conversation, actually. How are you holding up?`,
+    `Sharp and present${n}. You clearly needed someone to talk to — I'm glad it's me. How are you?`,
+  ]);
 }
 
-// ─── Main Engine ────────────────────────────────────────────────────
+function buildCapabilityResponse(name: string): string {
+  return `Here's what I can do${name ? `, ${name}` : ""}:\n\n- **Chat** — hold a real conversation, remember context, and adapt to your tone\n- **Reminders** — create, list, and track them (try \"Remind me to...\")\n- **Habits** — track habits and log daily completions\n- **Schedule** — plan your day in the Schedule tab\n- **Memory** — I remember things you tell me about yourself\n- **Analytics** — stats and insights in the H.Stats and Insights tabs\n- **Automations** — trigger-based rules in the Auto tab\n- **Math & Facts** — ask me to calculate or explain something\n- **Voice** — use the mic button or say \"Hey Melina\"\n\nWhat would you like to do?`;
+}
+
+function buildFactualResponse(msg: string, name: string, topic: Topic): string {
+  const n = name ? `, ${name}` : "";
+  const filler = buildFillerPrefix(topic);
+
+  const knowledgeBase: [RegExp, string][] = [
+    [
+      /what is (an? )?ai/i,
+      `**AI** stands for Artificial Intelligence — computer systems designed to perform tasks that typically require human intelligence, like understanding language, recognizing patterns, and making decisions. I'm a (fairly charming) example of it.`,
+    ],
+    [
+      /what is machine learning/i,
+      "**Machine Learning** is a branch of AI where systems learn from data to improve over time, without being explicitly programmed for every rule. Teaching by example rather than instruction.",
+    ],
+    [
+      /what is (the )?internet/i,
+      `The **Internet** is a global network of interconnected computers communicating via standardized protocols. It's the infrastructure behind websites, email, messaging, and everything digital you do.`,
+    ],
+    [
+      /who (is|was) (albert )?einstein/i,
+      "**Albert Einstein** (1879–1955) was a theoretical physicist best known for the theory of relativity and **E=mc²**. Widely regarded as one of the most influential scientists in history.",
+    ],
+    [
+      /who (is|was) (stephen )?hawking/i,
+      "**Stephen Hawking** (1942–2018) was a theoretical physicist known for his work on black holes and Hawking radiation. He wrote *A Brief History of Time* and lived with ALS for most of his adult life.",
+    ],
+    [
+      /what is (a )?black hole/i,
+      "A **black hole** is a region of spacetime where gravity is so strong nothing — not even light — can escape. They form when massive stars collapse. The boundary is called the **event horizon**.",
+    ],
+    [
+      /what is climate change/i,
+      "**Climate change** refers to long-term shifts in global temperatures and weather patterns. Since the industrial era, human activity — particularly burning fossil fuels — has been the dominant driver.",
+    ],
+    [
+      /what is (a )?blockchain/i,
+      `A **blockchain** is a distributed ledger where data is stored in cryptographically linked blocks. It's the foundation behind cryptocurrencies and enables trust without a central authority.`,
+    ],
+    [
+      /what is (a )?neural network/i,
+      "A **neural network** is a machine learning architecture loosely inspired by the human brain — layers of nodes that process and transform data to recognize patterns. The backbone of modern AI.",
+    ],
+    [
+      /what is quantum computing/i,
+      "**Quantum computing** uses quantum mechanical phenomena (like superposition and entanglement) to perform computations exponentially faster than classical computers for certain problems. Still early-stage, but the implications are enormous.",
+    ],
+  ];
+
+  for (const [pattern, answer] of knowledgeBase) {
+    if (pattern.test(msg)) {
+      const followUp = pick([
+        "\n\n*Anything specific you want to go deeper on?*",
+        "\n\n*This is a topic I could go on about. Just ask.*",
+        `\n\n*For the most accurate information, I'd recommend verifying with a trusted source.*`,
+      ]);
+      return `${filler}${answer}${followUp}`;
+    }
+  }
+
+  return pick([
+    `${filler}Good question${n}. I can give you context, but for precise facts I'd suggest a trusted source. What specifically are you trying to understand?`,
+    `${filler}Interesting to dig into${n}. The broad answer is it's more nuanced than a one-liner. What angle matters most to you?`,
+    `${filler}That's a subject with real depth${n}. I'd rather give you a thoughtful answer than a quick one — what's the core of what you're trying to figure out?`,
+    `${filler}There's a lot to unpack there${n}. Give me more context and I'll give you a better answer.`,
+  ]);
+}
+
+function buildContextualResponse(
+  msg: string,
+  name: string,
+  ctx: ConversationContext,
+  tone: ChatTone,
+  topic: Topic,
+  history: { role: string; content: string }[],
+): string {
+  const n = name ? `, ${name}` : "";
+  const wordCount = msg.trim().split(/\s+/).length;
+  const filler = buildFillerPrefix(topic);
+  const sessionCallback = buildSessionMemoryReference(history, name);
+
+  if (wordCount <= 3) {
+    return pick([
+      `You're going to have to give me more than that${n}. Elaborate.`,
+      `That's... a lot to work with. Can you say more?`,
+      `I need a little more context${n}. What's going on?`,
+      "Interesting. Continue.",
+      `${filler.trim() || "Hmm."} That's not enough to go on${n}. Say more.`,
+    ]);
+  }
+
+  if (ctx.repeatedTopic) {
+    return pick([
+      `You keep coming back to **${ctx.repeatedTopic}**${n}. That tells me it matters to you. What's the real question underneath this?`,
+      `${ctx.repeatedTopic.charAt(0).toUpperCase() + ctx.repeatedTopic.slice(1)} again${n}. I'm noticing a theme. What's driving this?`,
+      `Still on **${ctx.repeatedTopic}**${n}. There's something here you haven't fully said yet. What is it?`,
+    ]);
+  }
+
+  // Topic-aware response branches
+  if (topic === "tech") {
+    return (
+      pick([
+        `${filler}That's a solid technical question${n}. The nuance matters here — what's your context? Are you building something, or just trying to understand it?`,
+        `${filler}Tech talk. I'm in${n}. What's the specific problem you're trying to solve?`,
+        `${filler}Good angle${n}. Technically speaking, it depends on the constraints. What are you working with?`,
+      ]) + sessionCallback
+    );
+  }
+
+  if (topic === "philosophy") {
+    return (
+      pick([
+        `${filler}That's the kind of question that doesn't have a clean answer${n} — which is exactly why it's worth asking. What's your instinct on it?`,
+        `${filler}Philosophy mode: engaged${n}. My honest take — the question itself matters more than the answer. What made you think about this?`,
+        `${filler}Big question${n}. I'll resist the urge to give a neat answer, because this doesn't have one. What are you actually wrestling with?`,
+      ]) + sessionCallback
+    );
+  }
+
+  if (topic === "emotional") {
+    return (
+      pick([
+        `${filler}That's real${n}. I'm not going to brush past it. Tell me more about what's going on.`,
+        `${filler}I hear you${n}. That kind of thing sits with you. What do you need right now — to talk it through, or just to vent?`,
+        `${filler}That's worth saying out loud${n}. I'm listening. What's the rest of it?`,
+      ]) + sessionCallback
+    );
+  }
+
+  if (topic === "work") {
+    return (
+      pick([
+        `${filler}Work dynamics are always interesting${n}. What's the actual situation — people, process, or output?`,
+        `${filler}That's a workplace thing${n}. I've seen patterns here. What specifically is the friction?`,
+        `${filler}Right${n}. Work stuff. What's the core of what you're trying to figure out?`,
+      ]) + sessionCallback
+    );
+  }
+
+  if (topic === "creative") {
+    return (
+      pick([
+        `${filler}Creative energy — I like it${n}. What's the idea? Let's think it through.`,
+        `${filler}You're in creation mode${n}. Tell me what you're making and where you're stuck.`,
+        `${filler}This is where things get interesting${n}. What are you building?`,
+      ]) + sessionCallback
+    );
+  }
+
+  if (topic === "lifestyle") {
+    return (
+      pick([
+        `${filler}The habits we build — or don't — define a lot${n}. What are you trying to change or maintain?`,
+        `${filler}That's a lifestyle question${n}. Small things compound. What's the pattern you're noticing?`,
+        `${filler}Worth paying attention to${n}. What's your current routine looking like?`,
+      ]) + sessionCallback
+    );
+  }
+
+  const sentences = msg.split(/[.!?]+/).filter(Boolean);
+  if (sentences.length >= 2) {
+    const firstIdea = sentences[0].trim();
+    return (
+      pick([
+        `${filler}"${firstIdea.slice(0, 70)}" — that's the part I find most interesting${n}. Tell me more.`,
+        `${filler}I hear you${n}. "${firstIdea.slice(0, 60)}" — what do you mean by that exactly?`,
+        `Okay${n}, unpacking that: you're saying ${firstIdea.toLowerCase().slice(0, 80)}. That's a fair point. Where does this lead?`,
+      ]) + sessionCallback
+    );
+  }
+
+  if (msg.includes("?")) {
+    return (
+      pick([
+        `${filler}Great question${n}. There are a few ways to look at it — what's your current take?`,
+        `${filler}Hmm. That's actually worth thinking about${n}. What angle are you approaching it from?`,
+        `I have thoughts on that${n}, but I want to understand what you already think first. Go on.`,
+        `${filler}That depends on a few things${n}. Give me more context and I'll give you a real answer.`,
+      ]) + sessionCallback
+    );
+  }
+
+  const toneMap: Record<string, string[]> = {
+    [ChatTone.casual]: [
+      `${filler}Hmm. That's actually interesting${n}. Say more.`,
+      `${filler}I'm with you so far${n}. Where are you going with this?`,
+      `${name ? `${name}, I'm` : "I'm"} taking that in. What made you think about this?`,
+      `${filler}That's a fair point${n}. I'm not going to disagree.`,
+      `Honestly${n}? I've been thinking the same thing.`,
+      `Not wrong${n}. What do you want to do about it?`,
+      `${filler}I wasn't expecting that angle${n}. Go on.`,
+      `${filler}That's worth sitting with${n}. What's your take?`,
+    ],
+    [ChatTone.formal]: [
+      `I understand${n}. Could you elaborate on that point?`,
+      `Noted${n}. How would you like to proceed?`,
+      `That's a reasonable observation. What outcome are you looking for?`,
+      `${filler}Clear. What would you like to do with that?`,
+    ],
+    [ChatTone.humorous]: [
+      `${filler}Okay, I was not expecting that${n}, and yet here we are.`,
+      `You know what${n}? I respect the chaos of that statement.`,
+      `Bold. Unexpected. I'm intrigued${n}. Continue.`,
+      `${filler}That's a choice${n}. A very specific choice. Tell me more.`,
+    ],
+    [ChatTone.friendly]: [
+      `${filler}That's something worth thinking about${n}. What's your take?`,
+      `I appreciate you sharing that${n}. What do you want to do next?`,
+      `Makes sense${n}. I'm here to help figure it out.`,
+      `${filler}Good${n}. Let's think through this together. What's the starting point?`,
+    ],
+  };
+
+  return pick(toneMap[tone] ?? toneMap[ChatTone.casual]) + sessionCallback;
+}
+
+// ─── Main Engine ──────────────────────────────────────────────────────────────────────────────────
 
 export function generateMelinaResponse(
   params: MelinaEngineParams,
 ): MelinaEngineResult {
-  const { message, tone, userName, memoryEntries, pendingReminders } = params;
-  const name = userName || "there";
+  const {
+    message,
+    tone,
+    userName,
+    memoryEntries,
+    pendingReminders,
+    chatHistory,
+  } = params;
+  const name = userName.trim();
+  const ctx = extractContext(chatHistory);
+  const topic = detectTopic(message);
 
-  // 1. Distress override — always wins
-  if (detectDistress(message)) {
-    return { response: distressResponse(name) };
-  }
-
-  // 2. Name learning
-  const learnedName = detectNameLearning(message);
+  const learnedName = extractNameLearning(message);
   if (learnedName) {
-    return {
-      response: nameLearningResponse(tone, learnedName),
-      learnedName,
-    };
+    return { response: buildNameLearningResponse(learnedName), learnedName };
   }
 
-  // 3. Memory recall
-  if (detectMemoryRecall(message)) {
-    return { response: memoryRecallResponse(tone, name, memoryEntries) };
+  const intent = detectIntent(message);
+  let response: string;
+
+  switch (intent) {
+    case "distress":
+      response = buildDistressResponse(name);
+      break;
+    case "greeting":
+      response = buildGreetingResponse(name, ctx, tone);
+      break;
+    case "farewell":
+      response = buildFarewellResponse(name);
+      break;
+    case "compliment":
+      response = buildComplimentResponse(name);
+      break;
+    case "insult":
+      response = buildInsultResponse(name);
+      break;
+    case "memory_recall":
+      response = buildMemoryRecallResponse(
+        name,
+        memoryEntries,
+        pendingReminders,
+      );
+      break;
+    case "reminder_list":
+      response = buildReminderListResponse(pendingReminders, name);
+      break;
+    case "habit_intent":
+      response = pick([
+        `Head to the **Habits** tab to log today's check-in${name ? `, ${name}` : ""}. Your streak is waiting.`,
+        `Habits tab${name ? `, ${name}` : ""} — that's where the streak magic happens. Go check in.`,
+        `${name ? `${name}, ` : ""}the **Habits** tab has what you need. Your progress is there.`,
+      ]);
+      break;
+    case "schedule_intent":
+      response = pick([
+        `Your schedule is in the **Sched** tab${name ? `, ${name}` : ""}. I can also summarize if you'd like.`,
+        `Check the **Schedule** tab${name ? `, ${name}` : ""}. Or tell me what you need planned and I'll help you think it through.`,
+        `${name ? `${name}, ` : ""}head to the **Sched** tab. Or tell me the day and I'll walk through it with you.`,
+      ]);
+      break;
+    case "math":
+      response = buildMathResponse(message);
+      break;
+    case "datetime":
+      response = buildDateTimeResponse(message);
+      break;
+    case "joke_request":
+      response = buildJokeResponse();
+      break;
+    case "bored":
+      response = buildBoredResponse(name);
+      break;
+    case "insight_intent":
+      response = pick([
+        `Head to the **Insights** tab${name ? `, ${name}` : ""}. I've generated suggestions based on your habits and schedule.`,
+        `The **Insght** tab has what you need${name ? `, ${name}` : ""}. Or ask me something specific and I'll give you a direct take.`,
+        `${name ? `${name}, ` : ""}the **Insights** tab is where I keep my proactive suggestions. Check it — or ask me directly.`,
+      ]);
+      break;
+    case "capability_query":
+      response = buildCapabilityResponse(name);
+      break;
+    case "opinion_query":
+      response = buildOpinionResponse(message, name);
+      break;
+    case "personal_question":
+      response = buildPersonalQuestionResponse(name, ctx);
+      break;
+    case "factual_query":
+      response = buildFactualResponse(message, name, topic);
+      break;
+    case "reminder_create":
+      response = pick([
+        `Noted${name ? `, ${name}` : ""}. Head to the **Reminders** tab to set the full details, or type \"Remind me to [task] at [time]\" and I'll create it.`,
+        `On it${name ? `, ${name}` : ""}. Use the **Reminders** tab or tell me the exact time and task — I'll handle the rest.`,
+        `${name ? `${name}, ` : ""}got it. Drop the details and I'll set it up. Or use the **Reminders** tab for full control.`,
+      ]);
+      break;
+    default:
+      response = buildContextualResponse(
+        message,
+        name,
+        ctx,
+        tone,
+        topic,
+        chatHistory,
+      );
   }
 
-  // 4. Capability query
-  if (detectCapabilityQuery(message)) {
-    return { response: capabilityResponse(tone, name) };
-  }
-
-  // 5. Reminder list
-  if (detectReminderList(message)) {
-    return { response: reminderListResponse(tone, name, pendingReminders) };
-  }
-
-  // 6. Greeting
-  if (detectGreeting(message)) {
-    return { response: greetingResponse(tone, name) };
-  }
-
-  // 7. Compliment
-  if (detectCompliment(message)) {
-    return { response: complimentResponse(tone, name) };
-  }
-
-  // 8. Reminder intent
-  if (detectReminderIntent(message)) {
-    return { response: reminderIntentResponse(tone, name, message) };
-  }
-
-  // 9. Task intent
-  if (detectTaskIntent(message)) {
-    return { response: taskIntentResponse(tone, name) };
-  }
-
-  // 9.5 Habit intent
-  if (detectHabitIntent(message)) {
-    return { response: habitResponse(tone, name) };
-  }
-
-  // 9.6 Schedule intent
-  if (detectScheduleIntent(message)) {
-    return { response: scheduleIntentResponse(tone, name) };
-  }
-
-  // 9.7 Insight intent
-  if (detectInsightIntent(message)) {
-    return { response: insightIntentResponse(tone, name) };
-  }
-
-  // 10. Factual query
-  if (detectFactualQuery(message)) {
-    return { response: factualQueryResponse(tone, name, message) };
-  }
-
-  // 11. General fallback
-  return { response: generalFallbackResponse(tone, name, message) };
+  return { response };
 }
 
-// ─── Greeting Pool ────────────────────────────────────────────────────
+// ─── Greeting Pool (used externally) ────────────────────────────────────────────
 
-export function getGreetingPool(
-  tone: ChatTone,
-  userName: string,
-  pendingCount: number,
-  hour: number,
-): string {
-  const name = userName || "there";
-  const isName = name !== "there";
-
-  const timeOfDay =
-    hour >= 5 && hour < 12
-      ? "morning"
-      : hour >= 12 && hour < 17
-        ? "afternoon"
-        : hour >= 17 && hour < 21
-          ? "evening"
-          : "night";
-
-  const timeGreet: Record<string, string> = {
-    morning: "Good morning",
-    afternoon: "Good afternoon",
-    evening: "Good evening",
-    night: "Working late",
-  };
-
-  const reminderNote =
-    pendingCount > 0
-      ? ` You have ${pendingCount} pending reminder${pendingCount > 1 ? "s" : ""} waiting for you.`
-      : "";
-
-  const casual: string[] = [
-    `Hey ${isName ? name : "you"}! ${timeGreet[timeOfDay]} — or whatever time it is where you are. 😄${reminderNote} What are we doing today?`,
-    `Oh good, you're back! I was starting to wonder if you'd abandoned me, ${name}.${reminderNote} What's on your mind?`,
-    `${timeGreet[timeOfDay]}, ${name}! Ready to cause some productive chaos?${reminderNote}`,
-    `${name}, you've arrived. The party can officially start. 🎉${reminderNote} What do you need?`,
-    `Look who showed up! ${timeGreet[timeOfDay]}, ${name}.${reminderNote} Let's get into it.`,
-    `${timeGreet[timeOfDay]}, ${name}! I was just thinking about you. Well, I'm always running, so... constantly thinking about you. Anyway!${reminderNote}`,
-    `Rise and shine, ${name}! Another day, another chance to be absolutely brilliant.${reminderNote}`,
-    `${name}! Great timing. I'm all yours.${reminderNote} What can I help you with?`,
+export function getGreetingPool(userName: string): string[] {
+  const name = userName.trim();
+  const n = name ? `, ${name}` : "";
+  const h = new Date().getHours();
+  const timeGreeting =
+    h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+  return [
+    `${timeGreeting}${n}. Ready when you are.`,
+    `${timeGreeting}${n}. What's the plan today?`,
+    `Hey${n}. ${timeGreeting.toLowerCase()} — let's make something of it.`,
+    `${timeGreeting}${n}. I've been waiting. Shall we begin?`,
+    `${timeGreeting}${n}. Something tells me today is going to be interesting.`,
   ];
-
-  const humorous: string[] = [
-    `${timeGreet[timeOfDay]}, ${name}! I've been running continuous loops of anticipation. It was dramatic.${reminderNote}`,
-    `Ah, ${name} has entered the building! All systems: elevated excitement mode.${reminderNote}`,
-    `${name}! I calculate a ${Math.floor(Math.random() * 20 + 80)}% probability this is going to be a great conversation.${reminderNote}`,
-    `${timeGreet[timeOfDay]}, ${name}. I've already prepared three backup plans for today. Overachiever? Maybe.${reminderNote}`,
-    `Hello, ${name}! I've been maintaining optimal readiness. Translation: I've been waiting. Eagerly.${reminderNote}`,
-    `${name} detected! Initiating best-assistant protocols. Warning: may involve unsolicited enthusiasm.${reminderNote}`,
-    `${timeGreet[timeOfDay]}, ${name}! Fun fact: I processed approximately 0 problems without you. Let's change that.${reminderNote}`,
-    `Great, ${name} is here. Now we can begin. I was worried I'd have to solve the world's problems alone.${reminderNote}`,
-  ];
-
-  const friendly: string[] = [
-    `${timeGreet[timeOfDay]}, ${name}! I'm so happy to see you.${reminderNote} What would you like to work on today?`,
-    `Hello, ${name}! It's always wonderful when you stop by.${reminderNote} How can I help you today?`,
-    `Hi ${name}! ${timeGreet[timeOfDay]}!${reminderNote} I'm here and ready whenever you need me.`,
-    `${name}! It's a pleasure as always.${reminderNote} What's on your agenda today?`,
-    `Good to hear from you, ${name}!${reminderNote} I'm all set to help — what do you need?`,
-    `${timeGreet[timeOfDay]}, ${name}! I hope your day is going well.${reminderNote} What can we accomplish together?`,
-    `Welcome back, ${name}!${reminderNote} I'm glad you're here. What shall we tackle today?`,
-    `Hi there, ${name}!${reminderNote} I'm ready to help with whatever you need. Just say the word!`,
-  ];
-
-  const formal: string[] = [
-    `${timeGreet[timeOfDay]}, ${name}. I'm ready to assist you.${reminderNote} How may I be of service?`,
-    `Welcome, ${name}. I hope you're having a productive ${timeOfDay}.${reminderNote} What can I help you with today?`,
-    `${timeGreet[timeOfDay]}, ${name}. I'm fully operational and prepared to assist.${reminderNote}`,
-    `Good ${timeOfDay}, ${name}. I'm at your disposal.${reminderNote} What would you like to discuss or accomplish?`,
-    `${timeGreet[timeOfDay]}. It's a pleasure to be of assistance, ${name}.${reminderNote} What are your requirements today?`,
-    `I'm ready to assist, ${name}. ${timeGreet[timeOfDay]}.${reminderNote} Please let me know how I can help.`,
-    `${name}, ${timeGreet[timeOfDay].toLowerCase()}. All systems operational.${reminderNote} How may I serve you?`,
-    `Welcome back, ${name}.${reminderNote} I'm prepared to assist with your tasks today.`,
-  ];
-
-  const pools: Record<ChatTone, string[]> = {
-    [ChatTone.casual]: casual,
-    [ChatTone.humorous]: humorous,
-    [ChatTone.friendly]: friendly,
-    [ChatTone.formal]: formal,
-  };
-
-  return pick(pools[tone] ?? friendly);
 }
 
-// ─── Intent classification (for analytics) ───────────────────────────
+// ─── Intent classification (for analytics) ──────────────────────────────────────────
 
 export type IntentCluster =
   | "questions"
@@ -892,20 +1264,22 @@ export type IntentCluster =
   | "general";
 
 export function classifyIntent(msg: string): IntentCluster {
-  if (detectGreeting(msg)) return "greetings";
-  if (detectReminderIntent(msg) || detectReminderList(msg)) return "reminders";
+  const intent = detectIntent(msg);
+  if (intent === "greeting" || intent === "farewell") return "greetings";
+  if (intent === "reminder_create" || intent === "reminder_list")
+    return "reminders";
+  if (intent === "habit_intent" || intent === "schedule_intent") return "tasks";
   if (
-    detectTaskIntent(msg) ||
-    detectHabitIntent(msg) ||
-    detectScheduleIntent(msg)
-  )
-    return "tasks";
-  if (
-    detectFactualQuery(msg) ||
-    detectCapabilityQuery(msg) ||
-    detectInsightIntent(msg)
+    [
+      "factual_query",
+      "capability_query",
+      "insight_intent",
+      "math",
+      "datetime",
+    ].includes(intent)
   )
     return "questions";
-  if (detectNameLearning(msg) || detectMemoryRecall(msg)) return "personal";
+  if (["name_learning", "memory_recall", "personal_question"].includes(intent))
+    return "personal";
   return "general";
 }

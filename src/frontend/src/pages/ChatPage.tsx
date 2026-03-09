@@ -19,6 +19,7 @@ import {
   CalendarDays,
   ChevronUp,
   Clock,
+  Copy,
   Gauge,
   Keyboard,
   LogOut,
@@ -27,6 +28,7 @@ import {
   Mic,
   MicOff,
   Minimize2,
+  RefreshCw,
   Search,
   Send,
   Sparkles,
@@ -37,6 +39,7 @@ import {
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ChatTone } from "../backend.d";
@@ -434,7 +437,8 @@ export default function ChatPage() {
   );
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const reminderInjectedRef = useRef(false);
@@ -789,10 +793,9 @@ export default function ChatPage() {
 
   // ── Greeting ──────────────────────────────────────────────────────────
   const getGreeting = useCallback((): string => {
-    const tone = assistantSettings?.tone ?? ChatTone.friendly;
-    const hour = new Date().getHours();
-    return getGreetingPool(tone, userName, pendingRemindersData.length, hour);
-  }, [assistantSettings, userName, pendingRemindersData.length]);
+    const pool = getGreetingPool(userName);
+    return pool[Math.floor(Math.random() * pool.length)];
+  }, [userName]);
 
   // ── Send message ──────────────────────────────────────────────────────
   const handleSend = async (text?: string) => {
@@ -869,6 +872,140 @@ export default function ChatPage() {
       toast.error("Melina is unavailable. Try again.");
       setStatus("idle");
     }
+  };
+
+  // ── Regenerate last response ────────────────────────────────────────
+  const handleRegenerate = () => {
+    const msgs = [...localMessages];
+    const lastAiIdx = msgs.map((m) => m.role).lastIndexOf("assistant");
+    if (lastAiIdx === -1) return;
+    const lastUserMsg = msgs
+      .slice(0, lastAiIdx)
+      .reverse()
+      .find((m) => m.role === "user");
+    if (!lastUserMsg) return;
+    const newMsgs = msgs.filter((_, i) => i !== lastAiIdx);
+    setLocalMessages(newMsgs);
+    void handleSend(lastUserMsg.content);
+  };
+
+  // ── Copy message to clipboard ───────────────────────────────────────
+  const handleCopyMessage = (id: string, content: string) => {
+    void navigator.clipboard.writeText(content).then(() => {
+      setCopiedId(id);
+      setTimeout(
+        () => setCopiedId((prev) => (prev === id ? null : prev)),
+        2000,
+      );
+    });
+  };
+
+  // ── Render markdown-like message content ────────────────────────────
+  const renderMessageContent = (text: string): React.ReactNode => {
+    const lines = text.split("\n");
+    const elements: React.ReactNode[] = [];
+
+    const renderInline = (line: string, key: string): React.ReactNode => {
+      const parts: React.ReactNode[] = [];
+      let remaining = line;
+      let i = 0;
+
+      while (remaining.length > 0) {
+        const boldMatch = remaining.match(/^(.*?)\*\*(.+?)\*\*(.*)/s);
+        const italicMatch = remaining.match(/^(.*?)\*(.+?)\*(.*)/s);
+        const codeMatch = remaining.match(/^(.*?)`(.+?)`(.*)/s);
+
+        if (!boldMatch && !italicMatch && !codeMatch) {
+          parts.push(remaining);
+          break;
+        }
+
+        const firstBold = boldMatch
+          ? remaining.indexOf("**")
+          : Number.POSITIVE_INFINITY;
+        const firstItalic = italicMatch
+          ? remaining.indexOf("*", remaining.startsWith("**") ? 2 : 0)
+          : Number.POSITIVE_INFINITY;
+        const firstCode = codeMatch
+          ? remaining.indexOf("`")
+          : Number.POSITIVE_INFINITY;
+
+        if (firstBold <= firstItalic && firstBold <= firstCode && boldMatch) {
+          if (boldMatch[1]) parts.push(boldMatch[1]);
+          parts.push(<strong key={`${key}-b${i}`}>{boldMatch[2]}</strong>);
+          remaining = boldMatch[3];
+        } else if (firstCode <= firstItalic && codeMatch) {
+          if (codeMatch[1]) parts.push(codeMatch[1]);
+          parts.push(
+            <code
+              key={`${key}-c${i}`}
+              className="px-1 py-0.5 rounded bg-primary/10 text-primary font-mono text-xs"
+            >
+              {codeMatch[2]}
+            </code>,
+          );
+          remaining = codeMatch[3];
+        } else if (italicMatch) {
+          if (italicMatch[1]) parts.push(italicMatch[1]);
+          parts.push(<em key={`${key}-i${i}`}>{italicMatch[2]}</em>);
+          remaining = italicMatch[3];
+        } else {
+          parts.push(remaining);
+          break;
+        }
+        i++;
+      }
+
+      return parts.length === 1 && typeof parts[0] === "string"
+        ? (parts[0] as string)
+        : parts;
+    };
+
+    let inList = false;
+    let listItems: React.ReactNode[] = [];
+
+    const flushList = () => {
+      if (listItems.length > 0) {
+        elements.push(
+          <ul key={`list-${elements.length}`} className="space-y-0.5 my-1 pl-1">
+            {listItems}
+          </ul>,
+        );
+        listItems = [];
+        inList = false;
+      }
+    };
+
+    let keyCounter = 0;
+    for (const line of lines) {
+      const isBullet = /^[•\-] /.test(line);
+      const kc = keyCounter++;
+      const stableKey = `k${kc}`;
+      if (isBullet) {
+        inList = true;
+        const text2 = line.replace(/^[•\-] /, "");
+        listItems.push(
+          <li key={stableKey} className="flex gap-1.5 items-start">
+            <span className="text-primary/70 mt-0.5 flex-shrink-0">•</span>
+            <span>{renderInline(text2, stableKey)}</span>
+          </li>,
+        );
+      } else {
+        if (inList) flushList();
+        if (line.trim() === "") {
+          elements.push(<br key={stableKey} />);
+        } else {
+          elements.push(
+            <span key={stableKey} className="block">
+              {renderInline(line, stableKey)}
+            </span>,
+          );
+        }
+      }
+    }
+
+    if (inList) flushList();
+    return <>{elements}</>;
   };
 
   const handleClearChat = async () => {
@@ -1354,7 +1491,7 @@ export default function ChatPage() {
                 </div>
               ) : allMessages.length === 0 ? (
                 <div
-                  className="flex flex-col items-center justify-center h-full min-h-[300px] gap-4"
+                  className="flex flex-col items-center justify-center h-full min-h-[300px] gap-5 px-4"
                   data-ocid="chat.empty_state"
                 >
                   <div className="w-16 h-16 rounded-full border border-primary/30 flex items-center justify-center">
@@ -1367,9 +1504,39 @@ export default function ChatPage() {
                     <p className="font-body text-sm text-muted-foreground/60 mt-1">
                       Say something to Melina
                     </p>
-                    <p className="font-mono text-[9px] text-muted-foreground/40 mt-2 tracking-wider">
-                      Press / to focus input · Ctrl+K for commands
-                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 w-full max-w-sm">
+                    {[
+                      {
+                        label: "What can you do?",
+                        ocid: "chat.suggestion.button.1",
+                      },
+                      {
+                        label: "Tell me a joke",
+                        ocid: "chat.suggestion.button.2",
+                      },
+                      {
+                        label: "Help me plan my day",
+                        ocid: "chat.suggestion.button.3",
+                      },
+                      {
+                        label: "How are you feeling?",
+                        ocid: "chat.suggestion.button.4",
+                      },
+                    ].map(({ label, ocid }) => (
+                      <button
+                        key={label}
+                        type="button"
+                        data-ocid={ocid}
+                        onClick={() => {
+                          setInputText(label);
+                          void handleSend(label);
+                        }}
+                        className="px-3 py-2 rounded-sm border border-primary/20 bg-primary/5 hover:bg-primary/15 hover:border-primary/50 font-body text-xs text-foreground/70 hover:text-foreground transition-all text-left"
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
                 </div>
               ) : (
@@ -1480,9 +1647,26 @@ export default function ChatPage() {
                               )}
                             </div>
                           ) : (
-                            <p className="font-body text-sm leading-relaxed text-foreground/90 whitespace-pre-line">
-                              {msg.content}
-                            </p>
+                            <div className="font-body text-sm leading-relaxed text-foreground/90 relative group/msg">
+                              {renderMessageContent(msg.content)}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleCopyMessage(msg.id, msg.content)
+                                }
+                                className="absolute -top-2 -right-2 opacity-0 group-hover/msg:opacity-100 transition-opacity h-5 w-5 flex items-center justify-center rounded-sm bg-card/80 border border-border/60 text-muted-foreground/60 hover:text-foreground hover:border-primary/50"
+                                aria-label="Copy message"
+                                data-ocid="chat.copy_button"
+                              >
+                                {copiedId === msg.id ? (
+                                  <span className="text-[8px] font-mono text-primary">
+                                    ✓
+                                  </span>
+                                ) : (
+                                  <Copy className="w-2.5 h-2.5" />
+                                )}
+                              </button>
+                            </div>
                           )}
                         </div>
 
@@ -1547,6 +1731,24 @@ export default function ChatPage() {
                       </motion.div>
                     )}
                   </AnimatePresence>
+
+                  {/* Regenerate last response */}
+                  {localMessages.length > 0 &&
+                    localMessages[localMessages.length - 1]?.role ===
+                      "assistant" &&
+                    status === "idle" && (
+                      <div className="flex justify-center pt-1 pb-0.5">
+                        <button
+                          type="button"
+                          onClick={handleRegenerate}
+                          className="flex items-center gap-1.5 px-3 py-1 rounded-sm border border-border/40 bg-card/30 hover:bg-primary/10 hover:border-primary/40 font-mono text-[9px] text-muted-foreground/50 hover:text-primary/70 transition-all tracking-wider"
+                          data-ocid="chat.regenerate_button"
+                        >
+                          <RefreshCw className="w-2.5 h-2.5" />
+                          Regenerate
+                        </button>
+                      </div>
+                    )}
                 </>
               )}
             </div>
@@ -1644,25 +1846,42 @@ export default function ChatPage() {
               </AlertDialog>
 
               {/* Text input */}
-              <input
-                ref={inputRef}
-                type="text"
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    void handleSend();
+              <div className="flex-1 flex flex-col gap-0.5">
+                <textarea
+                  ref={inputRef}
+                  rows={1}
+                  value={inputText}
+                  onChange={(e) => {
+                    const val = e.target.value.slice(0, 2000);
+                    setInputText(val);
+                    e.target.style.height = "auto";
+                    e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void handleSend();
+                    }
+                  }}
+                  placeholder={
+                    isRecording
+                      ? "Recording voice note..."
+                      : "Message Melina..."
                   }
-                }}
-                placeholder={
-                  isRecording ? "Recording voice note..." : "Message Melina..."
-                }
-                disabled={isRecording || sendMessage.isPending}
-                className="flex-1 h-9 px-3 rounded-sm font-body text-sm hud-input disabled:opacity-50"
-                autoComplete="off"
-                data-ocid="chat.input"
-              />
+                  disabled={isRecording || sendMessage.isPending}
+                  className="w-full px-3 py-2 rounded-sm font-body text-sm hud-input disabled:opacity-50 resize-none overflow-hidden min-h-[36px] leading-relaxed"
+                  autoComplete="off"
+                  data-ocid="chat.input"
+                  style={{ height: "36px" }}
+                />
+                {inputText.length > 0 && (
+                  <span
+                    className={`font-mono text-[9px] text-right pr-1 transition-colors ${inputText.length > 1800 ? "text-destructive/70" : "text-muted-foreground/40"}`}
+                  >
+                    {inputText.length}/2000
+                  </span>
+                )}
+              </div>
 
               {/* Voice button */}
               <Button
