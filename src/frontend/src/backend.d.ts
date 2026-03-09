@@ -107,6 +107,8 @@ export interface backendInterface {
     getCallerUserProfile(): Promise<UserProfile | null>;
     getCallerUserRole(): Promise<UserRole>;
     getChatHistory(): Promise<Array<Message>>;
+    getChatHistoryPage: (offset: bigint, limit: bigint) => Promise<Message[]>;
+    getChatHistoryCount: () => Promise<bigint>;
     getIntegrationStatus(): Promise<IntegrationStatus>;
     getNotifications(): Promise<Array<Notification>>;
     getReminders(): Promise<Array<Reminder>>;

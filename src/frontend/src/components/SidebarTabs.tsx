@@ -29,10 +29,12 @@ import {
 } from "../hooks/useQueries";
 import AnalyticsPanel from "./AnalyticsPanel";
 import DashboardPanel from "./DashboardPanel";
+import HabitAnalytics from "./HabitAnalytics";
 import HabitsPanel from "./HabitsPanel";
 import InsightsPanel from "./InsightsPanel";
 import MemoryPanel from "./MemoryPanel";
 import SchedulePlanner from "./SchedulePlanner";
+import TaskAutomation from "./TaskAutomation";
 
 // ── Integration grid ──────────────────────────────────────────────
 type IntegrationKey = keyof IntegrationStatus;
@@ -304,7 +306,6 @@ function ProfileTab() {
   const [displayName, setDisplayName] = useState("Melina");
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 
-  // Sync on load
   useEffect(() => {
     if (settings) {
       setTone(settings.tone);
@@ -335,7 +336,6 @@ function ProfileTab() {
 
   return (
     <div className="space-y-3">
-      {/* User info */}
       {userProfile && (
         <div className="p-2.5 rounded-sm bg-card/20 border border-border/40 space-y-1">
           <div className="flex items-center gap-1.5">
@@ -357,7 +357,6 @@ function ProfileTab() {
         </div>
       )}
 
-      {/* Display name */}
       <div className="space-y-1">
         <span className="font-mono text-[9px] text-muted-foreground/60 uppercase tracking-wider">
           Assistant Name
@@ -376,7 +375,6 @@ function ProfileTab() {
         />
       </div>
 
-      {/* Tone selector */}
       <div className="space-y-1.5">
         <span className="font-mono text-[9px] text-muted-foreground/60 uppercase tracking-wider">
           Personality Tone
@@ -402,7 +400,6 @@ function ProfileTab() {
         </div>
       </div>
 
-      {/* Notifications toggle */}
       <div className="flex items-center justify-between py-1 border-t border-border/30">
         <span className="font-mono text-[10px] text-muted-foreground/70 tracking-wider uppercase">
           Notifications
@@ -511,7 +508,7 @@ export default function SidebarTabs({
   onTabChange?: (tab: string) => void;
 }) {
   const tabClass =
-    "flex-1 h-full rounded-none text-[5.8px] font-mono tracking-[0.04em] uppercase px-0 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none border-r border-border/20";
+    "flex-1 h-full rounded-none text-[5.5px] font-mono tracking-[0.03em] uppercase px-0 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none border-r border-border/20";
 
   return (
     <Tabs
@@ -520,7 +517,8 @@ export default function SidebarTabs({
       onValueChange={onTabChange}
       className="flex-1 flex flex-col overflow-hidden sidebar-tabs"
     >
-      <TabsList className="flex w-full rounded-none bg-card/10 border-b border-border/30 h-8 p-0 flex-shrink-0">
+      {/* Row 1: main tabs */}
+      <TabsList className="flex w-full rounded-none bg-card/10 border-b border-border/20 h-7 p-0 flex-shrink-0">
         <TabsTrigger
           value="dashboard"
           className={tabClass}
@@ -556,6 +554,10 @@ export default function SidebarTabs({
         >
           Rmnd
         </TabsTrigger>
+      </TabsList>
+
+      {/* Row 2: secondary tabs */}
+      <TabsList className="flex w-full rounded-none bg-card/10 border-b border-border/30 h-7 p-0 flex-shrink-0">
         <TabsTrigger
           value="schedule"
           className={tabClass}
@@ -571,6 +573,13 @@ export default function SidebarTabs({
           Habits
         </TabsTrigger>
         <TabsTrigger
+          value="habit-analytics"
+          className={tabClass}
+          data-ocid="sidebar.habit_analytics_tab"
+        >
+          H.Stats
+        </TabsTrigger>
+        <TabsTrigger
           value="memory"
           className={tabClass}
           data-ocid="sidebar.memory_tab"
@@ -579,10 +588,17 @@ export default function SidebarTabs({
         </TabsTrigger>
         <TabsTrigger
           value="integrations"
-          className="flex-1 h-full rounded-none text-[5.8px] font-mono tracking-[0.04em] uppercase px-0 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none"
+          className={tabClass}
           data-ocid="sidebar.integrations_tab"
         >
           Intgr
+        </TabsTrigger>
+        <TabsTrigger
+          value="automate"
+          className={tabClass}
+          data-ocid="sidebar.automate_tab"
+        >
+          Auto
         </TabsTrigger>
       </TabsList>
 
@@ -615,12 +631,20 @@ export default function SidebarTabs({
           <HabitsPanel />
         </TabsContent>
 
+        <TabsContent value="habit-analytics" className="m-0 p-2">
+          <HabitAnalytics />
+        </TabsContent>
+
         <TabsContent value="memory" className="m-0 p-2">
           <MemoryPanel />
         </TabsContent>
 
         <TabsContent value="integrations" className="m-0 p-2">
           <IntegrationsTab />
+        </TabsContent>
+
+        <TabsContent value="automate" className="m-0 p-2">
+          <TaskAutomation />
         </TabsContent>
       </div>
 

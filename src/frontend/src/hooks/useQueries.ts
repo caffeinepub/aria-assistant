@@ -462,3 +462,29 @@ export function useCompleteScheduleEvent() {
     },
   });
 }
+
+// ─── Chat History Page ─────────────────────────────────────────────
+export function useChatHistoryPage(offset: number, limit: number) {
+  const { actor, isFetching } = useActor();
+  return useQuery<Message[]>({
+    queryKey: ["chatHistoryPage", offset, limit],
+    queryFn: async () => {
+      if (!actor) return [];
+      return actor.getChatHistoryPage(BigInt(offset), BigInt(limit));
+    },
+    enabled: !!actor && !isFetching,
+  });
+}
+
+// ─── Chat History Count ────────────────────────────────────────────
+export function useChatHistoryCount() {
+  const { actor, isFetching } = useActor();
+  return useQuery<bigint>({
+    queryKey: ["chatHistoryCount"],
+    queryFn: async () => {
+      if (!actor) return BigInt(0);
+      return actor.getChatHistoryCount();
+    },
+    enabled: !!actor && !isFetching,
+  });
+}

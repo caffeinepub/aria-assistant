@@ -10,10 +10,10 @@ import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import AccessControl "authorization/access-control";
 import MixinAuthorization "authorization/MixinAuthorization";
-import Migration "migration";
+
 import Timestamp "mo:core/Time";
 
-(with migration = Migration.run)
+
 actor {
   type Timestamp = Int;
   public type UserId = Principal;
@@ -205,6 +205,33 @@ actor {
     switch (chatHistories.get(caller)) {
       case (null) { [] };
       case (?history) { history };
+    };
+  };
+
+  // Phase 6A: Paginated chat history — load messages in pages
+  public query ({ caller }) func getChatHistoryPage(offset : Nat, limit : Nat) : async [Message] {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can get chat history");
+    };
+    switch (chatHistories.get(caller)) {
+      case (null) { [] };
+      case (?history) {
+        let size = history.size();
+        if (offset >= size) { return []; };
+        let end = Nat.min(offset + limit, size);
+        history.sliceToArray(offset, end);
+      };
+    };
+  };
+
+  // Phase 6A: Total message count for pagination
+  public query ({ caller }) func getChatHistoryCount() : async Nat {
+    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
+      Runtime.trap("Unauthorized: Only users can get chat count");
+    };
+    switch (chatHistories.get(caller)) {
+      case (null) { 0 };
+      case (?history) { history.size() };
     };
   };
 
@@ -511,13 +538,14 @@ actor {
 
     let updatedHistory = [assistantMessage].concat(historyWithUser);
 
-    let trimmedHistory = if (updatedHistory.size() > 50) {
-      updatedHistory.sliceToArray(0, 50);
+    // Phase 6A: Infinite chat — store all messages (up to 10,000 for memory safety)
+    let finalHistory = if (updatedHistory.size() > 10_000) {
+      updatedHistory.sliceToArray(0, 10_000);
     } else {
       updatedHistory;
     };
 
-    chatHistories.add(caller, trimmedHistory);
+    chatHistories.add(caller, finalHistory);
 
     {
       message = userMessage;

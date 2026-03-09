@@ -15,8 +15,9 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Activity,
-  Brain,
+  ArrowDown,
   CalendarDays,
+  ChevronUp,
   Clock,
   Gauge,
   Keyboard,
@@ -42,10 +43,12 @@ import { ChatTone } from "../backend.d";
 import NotificationAdvisor from "../components/NotificationAdvisor";
 import SettingsSheet from "../components/SettingsSheet";
 import SidebarTabs from "../components/SidebarTabs";
+import { WakeWord } from "../components/WakeWord";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import {
   useAssistantSettings,
   useChatHistory,
+  useChatHistoryCount,
   useClearChat,
   useMemoryEntries,
   useNotifications,
@@ -377,12 +380,19 @@ function FullScreenAvatar({
   );
 }
 
+// ─── Constants ────────────────────────────────────────────────────────
+const WINDOW_SIZE = 100; // max messages rendered at once
+const LOAD_MORE_STEP = 50; // messages to load when clicking "Load earlier"
+const SCROLL_THRESHOLD = 200; // px from bottom to trigger auto-scroll
+const JUMP_THRESHOLD = 300; // px from bottom to show "Jump to latest"
+
 // ─── ChatPage ─────────────────────────────────────────────────────────
 
 export default function ChatPage() {
   const { clear } = useInternetIdentity();
   const { data: chatHistory = [], isLoading: historyLoading } =
     useChatHistory();
+  const { data: chatHistoryCount } = useChatHistoryCount();
   const { data: memoryEntries = [] } = useMemoryEntries();
   const { data: userProfile } = useUserProfile();
   const { data: notifications = [] } = useNotifications();
@@ -405,6 +415,14 @@ export default function ChatPage() {
   const [activeTab, setActiveTab] = useState<string | undefined>(undefined);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [mobileActiveNavTab, setMobileActiveNavTab] = useState<string>("chat");
+
+  // Windowed rendering: how many messages from the start to hide
+  const [windowOffset, setWindowOffset] = useState(0);
+
+  // Smart auto-scroll & jump-to-latest
+  const [isNearBottom, setIsNearBottom] = useState(true);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
 
   // TTS state
   const [speakingId, setSpeakingId] = useState<string | null>(null);
@@ -440,6 +458,36 @@ export default function ChatPage() {
     .reverse()
     .find((m) => m.role === "assistant");
 
+  // Total message count (use backend count if available, fallback to local)
+  const totalMsgCount =
+    chatHistoryCount !== undefined
+      ? Number(chatHistoryCount) +
+        localMessages.filter(
+          (m) => m.id.startsWith("user-") || m.id.startsWith("ai-"),
+        ).length
+      : localMessages.length;
+
+  // Windowed messages: only show a slice for performance
+  const allMessages = localMessages;
+  const windowStart = Math.max(0, windowOffset);
+  const visibleMessages =
+    allMessages.length > WINDOW_SIZE
+      ? allMessages.slice(windowStart, windowStart + WINDOW_SIZE)
+      : allMessages;
+  const hiddenEarlierCount = windowStart;
+  const hasMoreEarlier = windowStart > 0;
+
+  // Load earlier messages handler
+  const handleLoadEarlier = useCallback(() => {
+    setWindowOffset((prev) => Math.max(0, prev - LOAD_MORE_STEP));
+    // After prepending, keep scroll position roughly the same
+    requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = 200;
+      }
+    });
+  }, []);
+
   // Save pending profile from registration
   useEffect(() => {
     if (userProfile === null && !profileSaved) {
@@ -461,7 +509,7 @@ export default function ChatPage() {
     }
   }, [userProfile, profileSaved, saveProfile]);
 
-  // Sync backend history to local messages
+  // Sync backend history to local messages (no cap — all messages)
   useEffect(() => {
     if (chatHistory.length > 0 && localMessages.length === 0) {
       const synced: LocalMessage[] = chatHistory.map((m, i) => ({
@@ -471,6 +519,10 @@ export default function ChatPage() {
         timestamp: Number(m.timestamp) / 1_000_000,
       }));
       setLocalMessages(synced);
+      // Start windowed at the end so latest messages are visible
+      if (synced.length > WINDOW_SIZE) {
+        setWindowOffset(synced.length - WINDOW_SIZE);
+      }
       requestAnimationFrame(() => {
         if (scrollRef.current) {
           scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -478,6 +530,21 @@ export default function ChatPage() {
       });
     }
   }, [chatHistory, localMessages.length]);
+
+  // Smart scroll: track if user is near bottom
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const handleScroll = () => {
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      setIsNearBottom(distFromBottom <= SCROLL_THRESHOLD);
+      setShowJumpToLatest(distFromBottom > JUMP_THRESHOLD);
+    };
+
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, []);
 
   // Proactive reminder injection (once per session)
   useEffect(() => {
@@ -516,7 +583,6 @@ export default function ChatPage() {
     if (insightInjectedRef.current) return;
     if (historyLoading) return;
 
-    // Only inject if user has habits or reminders
     let habitsRaw: { id: string; name: string; createdAt: number }[] = [];
     try {
       const raw = localStorage.getItem("aria_habits");
@@ -533,7 +599,6 @@ export default function ChatPage() {
     const tone = assistantSettings?.tone ?? ChatTone.friendly;
     const name = userName !== "there" ? userName : "";
 
-    // Pick an at-risk habit if any
     const atRiskHabit = habitsRaw.find((h) => {
       const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
       return h.createdAt < oneDayAgo;
@@ -576,7 +641,7 @@ export default function ChatPage() {
         if (prev.some((m) => m.id.startsWith("proactive-insight"))) return prev;
         return [...prev, injected];
       });
-    }, 4000); // delay so reminder injection goes first
+    }, 4000);
   }, [reminders, historyLoading, userName, assistantSettings?.tone]);
 
   // Alert status flash when unread notifications appear
@@ -607,7 +672,6 @@ export default function ChatPage() {
         activeEl instanceof HTMLInputElement ||
         activeEl instanceof HTMLTextAreaElement;
 
-      // Escape
       if (e.key === "Escape") {
         if (isFullScreen) {
           setIsFullScreen(false);
@@ -619,14 +683,12 @@ export default function ChatPage() {
         }
       }
 
-      // Ctrl+K / Cmd+K → command palette
       if ((e.ctrlKey || e.metaKey) && e.key === "k") {
         e.preventDefault();
         setCommandPaletteOpen((v) => !v);
         return;
       }
 
-      // Ctrl+Shift+M / Cmd+Shift+M → toggle memory tracking
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "m") {
         e.preventDefault();
         if (assistantSettings) {
@@ -644,7 +706,6 @@ export default function ChatPage() {
         return;
       }
 
-      // "/" → focus chat input (when not already in an input)
       if (e.key === "/" && !isInInput) {
         e.preventDefault();
         inputRef.current?.focus();
@@ -667,14 +728,64 @@ export default function ChatPage() {
     return () => window.removeEventListener("storage", handler);
   }, []);
 
-  // ── Auto-scroll helper ───────────────────────────────────────────────
-  const scrollToBottom = useCallback(() => {
+  // ── Automation external-message injection ────────────────────────────
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { content } = (e as CustomEvent<{ content: string }>).detail;
+      if (!content) return;
+      const injected = {
+        id: `automation-msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        role: "assistant" as const,
+        content,
+        timestamp: Date.now(),
+      };
+      setLocalMessages((prev) => [...prev, injected]);
+      setTimeout(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+      }, 80);
+    };
+    window.addEventListener("melina:external-message", handler);
+    return () => window.removeEventListener("melina:external-message", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Automation navigate-tab ────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { tab } = (e as CustomEvent<{ tab: string }>).detail;
+      if (tab) setActiveTab(tab);
+    };
+    window.addEventListener("melina:navigate-tab", handler);
+    return () => window.removeEventListener("melina:navigate-tab", handler);
+  }, []);
+
+  // ── Smart auto-scroll helper ──────────────────────────────────────────
+  const scrollToBottom = useCallback(
+    (force = false) => {
+      requestAnimationFrame(() => {
+        if (scrollRef.current && (force || isNearBottom)) {
+          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+      });
+    },
+    [isNearBottom],
+  );
+
+  const jumpToLatest = useCallback(() => {
+    // Move window offset to end to show latest messages
+    if (allMessages.length > WINDOW_SIZE) {
+      setWindowOffset(allMessages.length - WINDOW_SIZE);
+    }
     requestAnimationFrame(() => {
       if (scrollRef.current) {
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
       }
+      setShowJumpToLatest(false);
+      setIsNearBottom(true);
     });
-  }, []);
+  }, [allMessages.length]);
 
   // ── Greeting ──────────────────────────────────────────────────────────
   const getGreeting = useCallback((): string => {
@@ -695,28 +806,35 @@ export default function ChatPage() {
       timestamp: Date.now(),
     };
 
-    setLocalMessages((prev) => [...prev, userMsg]);
-    scrollToBottom();
+    setLocalMessages((prev) => {
+      const updated = [...prev, userMsg];
+      // Keep window showing latest when user sends a message
+      if (updated.length > WINDOW_SIZE) {
+        setWindowOffset(updated.length - WINDOW_SIZE);
+      }
+      return updated;
+    });
+    scrollToBottom(true);
     setInputText("");
     setStatus("thinking");
 
     try {
-      // Persist to backend (for history)
       await sendMessage.mutateAsync(msg);
       setStatus("responding");
 
-      // Generate Melina's response via personality engine
       const tone = assistantSettings?.tone ?? ChatTone.friendly;
+      // Pass last 20 messages as context (not all, to avoid bloat)
+      const contextHistory = allMessages.slice(-20).map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
       const engineResult = generateMelinaResponse({
         message: msg,
         tone,
         userName,
         memoryEntries,
         pendingReminders: pendingRemindersData,
-        chatHistory: localMessages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
+        chatHistory: contextHistory,
       });
 
       const aiMsg: LocalMessage = {
@@ -726,15 +844,19 @@ export default function ChatPage() {
         timestamp: Date.now(),
       };
 
-      setLocalMessages((prev) => [...prev, aiMsg]);
-      scrollToBottom();
+      setLocalMessages((prev) => {
+        const updated = [...prev, aiMsg];
+        if (updated.length > WINDOW_SIZE) {
+          setWindowOffset(updated.length - WINDOW_SIZE);
+        }
+        return updated;
+      });
+      scrollToBottom(true);
 
-      // Auto-speak if enabled
       if (autoSpeakEnabled && hasTTS) {
         speak(aiMsg.id, aiMsg.content);
       }
 
-      // If a name was learned, store it in memory
       if (engineResult.learnedName) {
         void updateMemory.mutateAsync({
           key: "name",
@@ -753,6 +875,7 @@ export default function ChatPage() {
     try {
       await clearChat.mutateAsync();
       setLocalMessages([]);
+      setWindowOffset(0);
       toast.success("Chat history cleared");
     } catch {
       toast.error("Failed to clear chat");
@@ -784,7 +907,7 @@ export default function ChatPage() {
           pendingSend: true,
         };
         setLocalMessages((prev) => [...prev, voiceMsg]);
-        scrollToBottom();
+        scrollToBottom(true);
 
         for (const t of stream.getTracks()) t.stop();
       };
@@ -833,13 +956,11 @@ export default function ChatPage() {
     setSpeakingId(null);
   };
 
-  // Voice note dismiss
   const dismissVoiceNote = (id: string) => {
     if (speakingId) stopSpeaking();
     setLocalMessages((prev) => prev.filter((m) => m.id !== id));
   };
 
-  // Send voice note to Melina
   const sendVoiceNote = (id: string) => {
     setLocalMessages((prev) =>
       prev.map((m) => (m.id === id ? { ...m, pendingSend: false } : m)),
@@ -848,8 +969,6 @@ export default function ChatPage() {
       "[Voice note received — please respond to my voice message]",
     );
   };
-
-  const allMessages = localMessages;
 
   // ── Command Palette Actions ─────────────────────────────────────────
   const commandActions: CommandPaletteAction[] = [
@@ -932,7 +1051,10 @@ export default function ChatPage() {
   const displayName = assistantSettings?.assistantDisplayName || "Melina";
 
   return (
-    <div className="h-screen bg-background hud-grid flex flex-col overflow-hidden relative">
+    <div
+      className="h-screen bg-background hud-grid flex flex-col overflow-hidden relative"
+      ref={chatContainerRef}
+    >
       {/* Full-screen avatar overlay */}
       <FullScreenAvatar
         open={isFullScreen}
@@ -1028,13 +1150,19 @@ export default function ChatPage() {
               className="w-full h-full object-cover object-top"
             />
           </button>
-          <div>
+          <div className="flex items-center gap-2">
             <span className="font-mono text-xs tracking-widest text-primary uppercase">
               ARIA
             </span>
-            <span className="font-mono text-[9px] text-muted-foreground ml-2 tracking-wider">
-              v5.0.0
+            <span className="font-mono text-[9px] text-muted-foreground ml-1 tracking-wider">
+              v6.0.0
             </span>
+            {/* Message count badge */}
+            {allMessages.length > 0 && (
+              <span className="font-mono text-[8px] text-muted-foreground/40 tracking-wider hidden sm:inline">
+                [{totalMsgCount > 0 ? totalMsgCount : allMessages.length} msgs]
+              </span>
+            )}
           </div>
         </div>
 
@@ -1053,7 +1181,6 @@ export default function ChatPage() {
                 aria-label="Stop speaking"
                 data-ocid="chat.speaking_indicator"
               >
-                {/* Animated wave bars */}
                 <span className="flex items-end gap-0.5 h-3">
                   {[0, 1, 2].map((i) => (
                     <span
@@ -1080,7 +1207,6 @@ export default function ChatPage() {
             </span>
           )}
 
-          {/* Command palette trigger */}
           <Button
             type="button"
             variant="ghost"
@@ -1093,7 +1219,6 @@ export default function ChatPage() {
             <Keyboard className="w-3.5 h-3.5" />
           </Button>
 
-          {/* Settings gear */}
           <SettingsSheet />
 
           <Button
@@ -1117,7 +1242,6 @@ export default function ChatPage() {
           className="w-72 p-0 bg-card/95 border-r border-border/60 flex flex-col backdrop-blur-md"
           data-ocid="mobile.sidebar_sheet"
         >
-          {/* Avatar section in sheet */}
           <div className="relative flex-shrink-0">
             <div className="relative overflow-hidden scanlines">
               <div
@@ -1163,30 +1287,22 @@ export default function ChatPage() {
           {/* Avatar section */}
           <div className="relative flex-shrink-0">
             <div className="relative overflow-hidden scanlines">
-              {/* Expression ring overlay */}
               <div
                 className={`absolute inset-0 z-10 pointer-events-none rounded-sm ${getExpressionClass(displayStatus)}`}
               />
-
               <img
                 src="/assets/generated/melina-avatar.dim_600x800.png"
                 alt="Melina Avatar"
                 className="w-full object-cover avatar-glow"
                 style={{ maxHeight: "240px", objectPosition: "top" }}
               />
-
-              {/* Overlay gradient */}
               <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-background/90 to-transparent" />
-
-              {/* HUD overlay elements */}
               <div className="absolute top-2 left-2 font-mono text-[8px] text-primary/60 tracking-widest z-20">
                 ARIA·UNIT·001
               </div>
               <div className="absolute top-2 right-2 font-mono text-[8px] text-primary/60 tracking-widest z-20">
                 ONLINE
               </div>
-
-              {/* Fullscreen button */}
               <button
                 type="button"
                 onClick={() => setIsFullScreen(true)}
@@ -1196,22 +1312,16 @@ export default function ChatPage() {
               >
                 <Maximize2 className="w-3 h-3" />
               </button>
-
-              {/* Bottom name overlay */}
               <div className="absolute bottom-3 left-0 right-8 text-center z-20">
                 <h2 className="font-display text-xl font-bold tracking-[0.4em] glow-cyan text-primary uppercase">
                   {displayName.toUpperCase()}
                 </h2>
               </div>
             </div>
-
-            {/* Status indicator */}
             <div className="flex justify-center py-1.5 border-b border-border/30">
               <StatusDot status={displayStatus} />
             </div>
           </div>
-
-          {/* Tabbed sidebar */}
           <SidebarTabs
             messageCount={allMessages.length}
             memoryCount={memoryEntries.length}
@@ -1221,7 +1331,7 @@ export default function ChatPage() {
         </aside>
 
         {/* ── Right Panel ── */}
-        <main className="flex-1 flex flex-col overflow-hidden">
+        <main className="flex-1 flex flex-col overflow-hidden relative">
           {/* Chat area */}
           <ScrollArea
             className="flex-1"
@@ -1229,7 +1339,6 @@ export default function ChatPage() {
           >
             <div className="p-4 space-y-3 min-h-full">
               {historyLoading ? (
-                /* Skeleton loader */
                 <div className="space-y-3" data-ocid="chat.loading_state">
                   {[1, 2, 3].map((i) => (
                     <div
@@ -1244,7 +1353,6 @@ export default function ChatPage() {
                   ))}
                 </div>
               ) : allMessages.length === 0 ? (
-                /* Empty state */
                 <div
                   className="flex flex-col items-center justify-center h-full min-h-[300px] gap-4"
                   data-ocid="chat.empty_state"
@@ -1265,9 +1373,44 @@ export default function ChatPage() {
                   </div>
                 </div>
               ) : (
-                /* Messages */
                 <>
-                  {allMessages.map((msg, idx) => (
+                  {/* Load Earlier Messages button */}
+                  {hasMoreEarlier && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="flex flex-col items-center gap-1.5 pb-2"
+                      data-ocid="chat.load_earlier_button"
+                    >
+                      <button
+                        type="button"
+                        onClick={handleLoadEarlier}
+                        className="flex items-center gap-2 px-4 py-1.5 rounded-sm border border-primary/30 bg-card/30 hover:bg-primary/10 hover:border-primary/60 transition-all font-mono text-[10px] tracking-wider text-primary/70 hover:text-primary"
+                      >
+                        <ChevronUp className="w-3 h-3" />
+                        Load earlier messages
+                      </button>
+                      <span className="font-mono text-[9px] text-muted-foreground/40 tracking-wider">
+                        Showing {visibleMessages.length} of {allMessages.length}{" "}
+                        messages
+                        {hiddenEarlierCount > 0 &&
+                          ` · ${hiddenEarlierCount} earlier hidden`}
+                      </span>
+                    </motion.div>
+                  )}
+
+                  {/* Show count label when windowed */}
+                  {allMessages.length > WINDOW_SIZE && !hasMoreEarlier && (
+                    <div className="flex justify-center pb-1">
+                      <span className="font-mono text-[9px] text-muted-foreground/30 tracking-wider">
+                        Showing latest {visibleMessages.length} of{" "}
+                        {allMessages.length} messages
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Messages */}
+                  {visibleMessages.map((msg, idx) => (
                     <motion.div
                       key={msg.id}
                       layout
@@ -1279,7 +1422,6 @@ export default function ChatPage() {
                       }`}
                       data-ocid={`chat.message.item.${idx + 1}`}
                     >
-                      {/* Avatar icon for Melina */}
                       {msg.role === "assistant" && (
                         <div className="w-6 h-6 rounded-full overflow-hidden border border-primary/30 flex-shrink-0 mb-1">
                           <img
@@ -1295,7 +1437,6 @@ export default function ChatPage() {
                           msg.role === "user" ? "items-end" : "items-start"
                         } flex flex-col`}
                       >
-                        {/* Bubble */}
                         <div
                           className={`rounded-sm px-3 py-2 ${
                             msg.role === "user"
@@ -1345,7 +1486,6 @@ export default function ChatPage() {
                           )}
                         </div>
 
-                        {/* Timestamp + TTS button */}
                         <div className="flex items-center gap-1 px-1">
                           <span className="font-mono text-[9px] text-muted-foreground/60">
                             {formatTime(msg.timestamp)}
@@ -1412,6 +1552,26 @@ export default function ChatPage() {
             </div>
           </ScrollArea>
 
+          {/* Jump to latest floating button */}
+          <AnimatePresence>
+            {showJumpToLatest && (
+              <motion.button
+                type="button"
+                initial={{ opacity: 0, scale: 0.8, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.8, y: 10 }}
+                transition={{ duration: 0.2 }}
+                onClick={jumpToLatest}
+                className="absolute bottom-20 right-4 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-primary/40 bg-card/80 hover:bg-primary/20 backdrop-blur-sm text-primary/80 hover:text-primary transition-all shadow-[0_0_20px_rgba(0,255,247,0.15)] font-mono text-[10px] tracking-wider"
+                aria-label="Jump to latest messages"
+                data-ocid="chat.jump_to_latest_button"
+              >
+                <ArrowDown className="w-3 h-3" />
+                Jump to latest
+              </motion.button>
+            )}
+          </AnimatePresence>
+
           {/* Notification Advisor (between messages and input) */}
           <NotificationAdvisor
             notificationsEnabled={
@@ -1420,6 +1580,19 @@ export default function ChatPage() {
           />
 
           {/* Input area */}
+          <WakeWord
+            onActivate={() => {
+              if (inputRef.current) {
+                inputRef.current.focus();
+              }
+            }}
+            onCommand={(text) => {
+              setInputText(text);
+              setTimeout(() => handleSend(text), 100);
+            }}
+            isRecording={isRecording}
+            disabled={sendMessage.isPending}
+          />
           <div className="flex-shrink-0 border-t border-border/50 bg-card/10 backdrop-blur-sm p-3">
             <div className="flex items-center gap-2">
               {/* Clear button */}
@@ -1435,14 +1608,20 @@ export default function ChatPage() {
                     <Trash2 className="w-4 h-4" />
                   </Button>
                 </AlertDialogTrigger>
-                <AlertDialogContent className="bg-card border-border font-body max-w-sm">
+                <AlertDialogContent
+                  className="bg-card border-border font-body max-w-sm"
+                  data-ocid="chat.dialog"
+                >
                   <AlertDialogHeader>
                     <AlertDialogTitle className="font-display text-foreground">
                       Clear Chat History
                     </AlertDialogTitle>
                     <AlertDialogDescription className="text-muted-foreground font-mono text-xs">
-                      This will permanently delete all messages. Melina&apos;s
-                      memories will be preserved.
+                      This will permanently delete all{" "}
+                      <span className="text-primary font-semibold">
+                        {allMessages.length}
+                      </span>{" "}
+                      messages. Melina&apos;s memories will be preserved.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
@@ -1457,7 +1636,8 @@ export default function ChatPage() {
                       className="bg-destructive/20 hover:bg-destructive/30 text-destructive border border-destructive/40 font-mono text-xs rounded-sm"
                       data-ocid="chat.confirm_button"
                     >
-                      Clear All
+                      Clear All{" "}
+                      {allMessages.length > 0 && `(${allMessages.length})`}
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>

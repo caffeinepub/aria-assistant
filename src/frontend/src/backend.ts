@@ -204,6 +204,8 @@ export interface backendInterface {
     updateMemoryEntry(key: string, value: string): Promise<void>;
     updateScheduleEvent(id: ScheduleEventId, title: string, note: string, category: string, startTime: Timestamp, endTime: Timestamp, date: string): Promise<boolean>;
     updateSettings(newSettings: AssistantSettings): Promise<void>;
+    getChatHistoryPage(offset: bigint, limit: bigint): Promise<Array<Message>>;
+    getChatHistoryCount(): Promise<bigint>;
 }
 import type { AssistantSettings as _AssistantSettings, ChatTone as _ChatTone, Notification as _Notification, NotificationSource as _NotificationSource, UserProfile as _UserProfile, UserRole as _UserRole } from "./declarations/backend.did.d.ts";
 export class Backend implements backendInterface {
@@ -445,6 +447,15 @@ export class Backend implements backendInterface {
             const result = await this.actor.getChatHistory();
             return result;
         }
+    }
+    async getChatHistoryPage(offset: bigint, limit: bigint): Promise<Array<Message>> {
+        // Fallback: return a slice of full history if backend doesn't support pagination yet
+        const all = await this.getChatHistory();
+        return all.slice(Number(offset), Number(offset) + Number(limit));
+    }
+    async getChatHistoryCount(): Promise<bigint> {
+        const all = await this.getChatHistory();
+        return BigInt(all.length);
     }
     async getIntegrationStatus(): Promise<IntegrationStatus> {
         if (this.processError) {
