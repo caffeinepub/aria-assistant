@@ -14,6 +14,7 @@ export interface MelinaEngineParams {
   memoryEntries: MemoryEntry[];
   pendingReminders: Reminder[];
   chatHistory: { role: string; content: string }[];
+  personalContext?: string;
 }
 
 export interface MelinaEngineResult {
@@ -1131,6 +1132,7 @@ export function generateMelinaResponse(
     memoryEntries,
     pendingReminders,
     chatHistory,
+    personalContext,
   } = params;
   const name = userName.trim();
   const ctx = extractContext(chatHistory);
@@ -1233,6 +1235,32 @@ export function generateMelinaResponse(
       );
   }
 
+  // Phase 117-A: Weave personal context into response occasionally (~1 in 4)
+  if (personalContext && Math.random() < 0.28) {
+    const contextParts = personalContext.split(" | ").filter(Boolean);
+    if (contextParts.length > 0) {
+      const chosen =
+        contextParts[Math.floor(Math.random() * contextParts.length)];
+      if (chosen.startsWith("User's name: ") && name) {
+        // Name is already used via 'name' variable; skip double-adding
+      } else if (chosen.startsWith("Interests: ")) {
+        const interests = chosen.replace("Interests: ", "");
+        const weavings = [
+          `(Given your interest in ${interests}, this is especially relevant.)`,
+          `— knowing you're into ${interests}, this tracks.`,
+        ];
+        response += ` ${weavings[Math.floor(Math.random() * weavings.length)]}`;
+      } else if (chosen.startsWith("Goals: ")) {
+        const goals = chosen.replace("Goals: ", "");
+        const weavings = [
+          `Worth keeping in mind given your goal: ${goals}.`,
+          `Ties back to your goal of ${goals}, too.`,
+        ];
+        response += ` ${weavings[Math.floor(Math.random() * weavings.length)]}`;
+      }
+    }
+  }
+
   return { response };
 }
 
@@ -1282,4 +1310,139 @@ export function classifyIntent(msg: string): IntentCluster {
   if (["name_learning", "memory_recall", "personal_question"].includes(intent))
     return "personal";
   return "general";
+}
+
+// ─── Phase 120-F: Language Detection ──────────────────────────────────────────
+
+/**
+ * Detect the language of a user message.
+ * Returns ISO 639-1 code: 'ar', 'fr', 'es', 'de', or 'en'.
+ */
+export function detectLanguage(text: string): string {
+  // Arabic: Unicode block \u0600-\u06FF
+  if (/[\u0600-\u06FF]/.test(text)) return "ar";
+  // French markers
+  if (
+    /\b(je|tu|il|elle|nous|vous|ils|elles|bonjour|merci|oui|non|pourquoi|comment|qu[e']est|s'il vous plaît|c'est|très|aussi|mais|avec|dans|sur|pour)\b/i.test(
+      text,
+    )
+  )
+    return "fr";
+  // Spanish markers
+  if (
+    /\b(hola|gracias|por favor|cómo|qué|sí|señor|señora|bueno|también|pero|con|para|que|es|el|la|los|las|un|una)\b/i.test(
+      text,
+    )
+  )
+    return "es";
+  // German markers
+  if (
+    /\b(ich|du|er|sie|wir|ihr|hallo|danke|bitte|warum|wie|was|ist|bin|habe|sind|haben|nicht|auch|aber|mit|für|auf|der|die|das|ein|eine)\b/i.test(
+      text,
+    )
+  )
+    return "de";
+  return "en";
+}
+
+const LANG_GREETINGS: Record<string, string[]> = {
+  ar: [
+    "أنا هنا للمساعدة.",
+    "بالتأكيد، دعني أشرح لك.",
+    "فهمت ما تقصده.",
+    "لا مشكلة، سأساعدك.",
+  ],
+  fr: [
+    "Je suis là pour t'aider.",
+    "Bien sûr, laisse-moi t'expliquer.",
+    "Je comprends ce que tu veux dire.",
+    "Pas de problème, je m'en occupe.",
+  ],
+  es: [
+    "Estoy aquí para ayudarte.",
+    "Por supuesto, déjame explicarte.",
+    "Entiendo lo que quieres decir.",
+    "No hay problema, me encargo.",
+  ],
+  de: [
+    "Ich bin hier, um zu helfen.",
+    "Natürlich, lass mich das erklären.",
+    "Ich verstehe, was du meinst.",
+    "Kein Problem, ich kümmere mich darum.",
+  ],
+};
+
+/**
+ * Optionally prefix a response with a localized acknowledgment phrase.
+ * Switches silently — no announcement.
+ */
+export function applyLanguagePrefix(
+  response: string,
+  lang: string,
+  message: string,
+): string {
+  if (lang === "en") return response;
+  const pool = LANG_GREETINGS[lang];
+  if (!pool) return response;
+  // Build a minimal localized response
+  const prefix = pool[Math.floor(Math.random() * pool.length)];
+  // For Arabic, return RTL-aware format
+  if (lang === "ar") {
+    return `${prefix}\n\n[Responding in Arabic based on your message: "${message.slice(0, 40)}${message.length > 40 ? "..." : ""}"]`;
+  }
+  return `${prefix}\n\n${response}`;
+}
+
+// ─── Phase 120-D: Personality Tone ────────────────────────────────────────────
+
+export type PersonalityTone = "formal" | "balanced" | "playful" | "direct";
+
+/**
+ * Adjust a response string according to the active personality tone.
+ */
+export function applyPersonalityTone(
+  response: string,
+  tone: PersonalityTone,
+): string {
+  if (tone === "balanced") return response;
+
+  if (tone === "direct") {
+    // Trim filler phrases, shorten sentences
+    return response
+      .replace(
+        /\b(Well,|Actually,|To be honest,|I must say,|You know,|Look,|Listen,)\s*/gi,
+        "",
+      )
+      .replace(
+        /\b(I think that|It seems like|It appears that|It looks like)\s*/gi,
+        "",
+      )
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  if (tone === "playful") {
+    const emojis = ["✨", "😏", "👀", "🔥", "💫", "🎯", "⚡"];
+    const emoji = emojis[Math.floor(Math.random() * emojis.length)];
+    // Add light emoji touch and casual style hint
+    return `${response} ${emoji}`;
+  }
+
+  if (tone === "formal") {
+    // Add formal opener if none
+    const formal = response
+      .replace(/\bI'm\b/g, "I am")
+      .replace(/\bdon't\b/g, "do not")
+      .replace(/\bcan't\b/g, "cannot")
+      .replace(/\bwon't\b/g, "will not")
+      .replace(/\bisn't\b/g, "is not")
+      .replace(/\baren't\b/g, "are not")
+      .replace(/\bwasn't\b/g, "was not")
+      .replace(/\bweren't\b/g, "were not");
+    return formal;
+  }
+
+  return response;
 }

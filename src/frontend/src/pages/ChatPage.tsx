@@ -1,4 +1,11 @@
 import {
+  ChatWallpaperOverlay,
+  DEFAULT_WALLPAPER,
+  type WallpaperConfig,
+  WallpaperPicker,
+  loadWallpaper,
+} from "@/components/WallpaperPicker";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -14,24 +21,19 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Activity,
   ArrowDown,
-  CalendarDays,
   ChevronUp,
-  Clock,
   Copy,
-  Gauge,
   Keyboard,
   LogOut,
   Maximize2,
-  MessageSquare,
+  Menu,
   Mic,
   MicOff,
   Minimize2,
   RefreshCw,
   Search,
   Send,
-  Sparkles,
   StopCircle,
   Trash2,
   Volume2,
@@ -43,7 +45,23 @@ import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ChatTone } from "../backend.d";
+import Avatar3DSidebar from "../components/Avatar3DSidebar";
+import { useCalendarEvents } from "../components/CalendarIntegration";
+import FloatingBubble from "../components/FloatingBubble";
+import { useGoals } from "../components/GoalsEngine";
+import MelinaAnimatedAvatar from "../components/MelinaAnimatedAvatar";
 import NotificationAdvisor from "../components/NotificationAdvisor";
+import NotificationHub from "../components/NotificationHub";
+import OfflineBanner, { useOfflineMode } from "../components/OfflineMode";
+import {
+  buildPersonalContext,
+  usePersonalIntelligence,
+} from "../components/PersonalIntelligence";
+import {
+  type AssistantTone,
+  useProactiveGreeting,
+} from "../components/ProactiveGreeting";
+import ReminderBanner from "../components/ReminderBanner";
 import SettingsSheet from "../components/SettingsSheet";
 import SidebarTabs from "../components/SidebarTabs";
 import { WakeWord } from "../components/WakeWord";
@@ -53,6 +71,7 @@ import {
   useChatHistory,
   useChatHistoryCount,
   useClearChat,
+  useCreateReminder,
   useMemoryEntries,
   useNotifications,
   useReminders,
@@ -62,7 +81,14 @@ import {
   useUpdateSettings,
   useUserProfile,
 } from "../hooks/useQueries";
-import { generateMelinaResponse, getGreetingPool } from "../lib/melina-engine";
+import {
+  type PersonalityTone,
+  applyLanguagePrefix,
+  applyPersonalityTone,
+  detectLanguage,
+  generateMelinaResponse,
+  getGreetingPool,
+} from "../lib/melina-engine";
 
 type MelinaStatus = "idle" | "thinking" | "responding" | "alert";
 
@@ -329,10 +355,10 @@ function FullScreenAvatar({
               <div
                 className={`absolute inset-0 z-10 pointer-events-none ${getExpressionClass(status)}`}
               />
-              <img
-                src="/assets/generated/melina-avatar.dim_600x800.png"
-                alt="Melina"
-                className="w-full h-full object-cover object-top"
+              <MelinaAnimatedAvatar
+                status={status}
+                size="fullscreen"
+                className="w-full h-full"
                 style={{ maxHeight: "65vh" }}
               />
               {/* Bottom gradient */}
@@ -406,6 +432,10 @@ export default function ChatPage() {
   const clearChat = useClearChat();
   const updateMemory = useUpdateMemory();
   const updateSettings = useUpdateSettings();
+  const createReminder = useCreateReminder();
+  const { profile: personalProfile, updateFromMessage: updatePersonalProfile } =
+    usePersonalIntelligence();
+  const calendarEvents = useCalendarEvents();
 
   const [inputText, setInputText] = useState("");
   const [status, setStatus] = useState<MelinaStatus>("idle");
@@ -416,8 +446,16 @@ export default function ChatPage() {
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<string | undefined>(undefined);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [mobileActiveNavTab, setMobileActiveNavTab] = useState<string>("chat");
+  const [bubbleRestored, setBubbleRestored] = useState(
+    () => localStorage.getItem("melina_bubble_removed") !== "true",
+  );
+  const { isOffline } = useOfflineMode();
+  const { goalsContext } = useGoals();
+  const isFirstTabChange = useRef(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [chatWallpaper, setChatWallpaper] = useState<WallpaperConfig>(() =>
+    loadWallpaper(),
+  );
 
   // Windowed rendering: how many messages from the start to hide
   const [windowOffset, setWindowOffset] = useState(0);
@@ -441,8 +479,6 @@ export default function ChatPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const reminderInjectedRef = useRef(false);
-  const insightInjectedRef = useRef(false);
   const alertShownRef = useRef(false);
 
   // Derived unread count and display status
@@ -491,6 +527,16 @@ export default function ChatPage() {
       }
     });
   }, []);
+
+  // Reset bubbleRestored after first tab navigation (so normal hide-on-chat rule takes over)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: activeTab change is the trigger
+  useEffect(() => {
+    if (isFirstTabChange.current) {
+      isFirstTabChange.current = false;
+      return;
+    }
+    setBubbleRestored(false);
+  }, [activeTab]);
 
   // Save pending profile from registration
   useEffect(() => {
@@ -550,103 +596,34 @@ export default function ChatPage() {
     return () => el.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // Proactive reminder injection (once per session)
-  useEffect(() => {
-    if (reminderInjectedRef.current) return;
-    if (historyLoading) return;
-    if (reminders.length === 0) return;
-
-    const now = Date.now();
-    const next24hNs = BigInt(now + 24 * 60 * 60 * 1000) * 1_000_000n;
-    const upcoming = reminders.filter(
-      (r) => !r.completed && r.dueTime <= next24hNs,
-    );
-
-    if (upcoming.length > 0) {
-      reminderInjectedRef.current = true;
-      const first = upcoming.sort((a, b) =>
-        a.dueTime < b.dueTime ? -1 : 1,
-      )[0];
+  // Phase 117-B: Proactive Intelligence greeting
+  useProactiveGreeting({
+    userName,
+    personalProfile: personalProfile
+      ? {
+          ...personalProfile,
+          name: personalProfile.name ?? undefined,
+        }
+      : null,
+    reminders,
+    assistantTone:
+      (assistantSettings?.tone as AssistantTone) ??
+      ("friendly" as AssistantTone),
+    historyLoading,
+    onGreeting: (message) => {
       const injected: LocalMessage = {
-        id: `proactive-reminder-${Date.now()}`,
+        id: `proactive-greeting-${Date.now()}`,
         role: "assistant",
-        content: `You have ${upcoming.length} reminder${upcoming.length > 1 ? "s" : ""} coming up soon. Your next one: "${first.title}". Would you like me to help prepare?`,
+        content: message,
         timestamp: Date.now(),
       };
       setLocalMessages((prev) => {
-        if (prev.length > 0 && prev[0].id.startsWith("proactive-reminder")) {
+        if (prev.some((m) => m.id.startsWith("proactive-greeting")))
           return prev;
-        }
-        return [injected, ...prev];
-      });
-    }
-  }, [reminders, historyLoading]);
-
-  // Proactive insight injection (once per session, after habit/reminder data loads)
-  useEffect(() => {
-    if (insightInjectedRef.current) return;
-    if (historyLoading) return;
-
-    let habitsRaw: { id: string; name: string; createdAt: number }[] = [];
-    try {
-      const raw = localStorage.getItem("aria_habits");
-      habitsRaw = raw ? (JSON.parse(raw) as typeof habitsRaw) : [];
-    } catch {
-      habitsRaw = [];
-    }
-
-    const hasData = habitsRaw.length > 0 || reminders.length > 0;
-    if (!hasData) return;
-
-    insightInjectedRef.current = true;
-
-    const tone = assistantSettings?.tone ?? ChatTone.friendly;
-    const name = userName !== "there" ? userName : "";
-
-    const atRiskHabit = habitsRaw.find((h) => {
-      const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-      return h.createdAt < oneDayAgo;
-    });
-
-    let body = "";
-    if (atRiskHabit) {
-      const habitName = atRiskHabit.name;
-      const toneMap: Record<ChatTone, string> = {
-        [ChatTone.casual]: `Hey${name ? ` ${name}` : ""}... I noticed "${habitName}" hasn't been checked in lately. Your streak's looking a little lonely. Head to Habits to log it — I'll be here not judging you. (I'm judging a little.)`,
-        [ChatTone.humorous]: `${name ? `${name}, ` : ""}just running a background analysis and "${habitName}" raised a flag. The streak counter is giving me worried eyes. Head to Habits — save us both the drama.`,
-        [ChatTone.friendly]: `${name ? `Hi ${name}! ` : ""}I noticed "${habitName}" hasn't been logged in a while. Want to head to the Habits tab and check in? Every step counts! Head over to Insights for a full picture.`,
-        [ChatTone.formal]: `${name ? `${name}, ` : ""}a review of your habit data indicates "${habitName}" may be falling behind schedule. I recommend visiting the Habits tab to log your progress and checking the Insights tab for a full report.`,
-      };
-      body = toneMap[tone];
-    } else if (reminders.length > 0) {
-      const pending = reminders.filter((r) => !r.completed);
-      if (pending.length > 0) {
-        const toneMap: Record<ChatTone, string> = {
-          [ChatTone.casual]: `${name ? `Hey ${name}, ` : ""}you've got ${pending.length} reminder${pending.length > 1 ? "s" : ""} waiting. Check the Insights tab — I've put together some thoughts on your day.`,
-          [ChatTone.humorous]: `${name ? `${name}, ` : ""}${pending.length} reminder${pending.length > 1 ? "s" : ""} detected. The Insights tab has my full professional assessment of your situation. Spoiler: you've got things to do.`,
-          [ChatTone.friendly]: `${name ? `${name}, ` : ""}I see you have ${pending.length} pending reminder${pending.length > 1 ? "s" : ""}. Hop over to the Insights tab for my personalized suggestions for today!`,
-          [ChatTone.formal]: `${name ? `${name}, ` : ""}you currently have ${pending.length} pending reminder${pending.length > 1 ? "s" : ""}. I have compiled relevant insights in the Insights panel for your review.`,
-        };
-        body = toneMap[tone];
-      }
-    }
-
-    if (!body) return;
-
-    const injected: LocalMessage = {
-      id: `proactive-insight-${Date.now()}`,
-      role: "assistant",
-      content: body,
-      timestamp: Date.now(),
-    };
-
-    setTimeout(() => {
-      setLocalMessages((prev) => {
-        if (prev.some((m) => m.id.startsWith("proactive-insight"))) return prev;
         return [...prev, injected];
       });
-    }, 4000);
-  }, [reminders, historyLoading, userName, assistantSettings?.tone]);
+    },
+  });
 
   // Alert status flash when unread notifications appear
   useEffect(() => {
@@ -778,7 +755,6 @@ export default function ChatPage() {
   );
 
   const jumpToLatest = useCallback(() => {
-    // Move window offset to end to show latest messages
     if (allMessages.length > WINDOW_SIZE) {
       setWindowOffset(allMessages.length - WINDOW_SIZE);
     }
@@ -797,6 +773,17 @@ export default function ChatPage() {
     return pool[Math.floor(Math.random() * pool.length)];
   }, [userName]);
 
+  // ── Bubble inject (proactive greeting from FloatingBubble) ──────────
+  const handleBubbleInject = useCallback((injectedContent: string) => {
+    const injected: LocalMessage = {
+      id: `bubble-inject-${Date.now()}`,
+      role: "assistant",
+      content: injectedContent,
+      timestamp: Date.now(),
+    };
+    setLocalMessages((prev) => [...prev, injected]);
+  }, []);
+
   // ── Send message ──────────────────────────────────────────────────────
   const handleSend = async (text?: string) => {
     const msg = (text ?? inputText).trim();
@@ -811,7 +798,6 @@ export default function ChatPage() {
 
     setLocalMessages((prev) => {
       const updated = [...prev, userMsg];
-      // Keep window showing latest when user sends a message
       if (updated.length > WINDOW_SIZE) {
         setWindowOffset(updated.length - WINDOW_SIZE);
       }
@@ -822,15 +808,111 @@ export default function ChatPage() {
     setStatus("thinking");
 
     try {
+      // 120-E: Offline mode fallback
+      if (isOffline) {
+        setStatus("responding");
+        const personalityTone2 =
+          (localStorage.getItem(
+            "melina_personality_tone",
+          ) as PersonalityTone) ?? "balanced";
+        const fullContext2 = [
+          buildPersonalContext(personalProfile),
+          goalsContext,
+        ]
+          .filter(Boolean)
+          .join("\n");
+        const offlineResult = generateMelinaResponse({
+          message: msg,
+          tone: assistantSettings?.tone ?? ChatTone.friendly,
+          userName,
+          memoryEntries,
+          pendingReminders: pendingRemindersData,
+          chatHistory: allMessages
+            .slice(-20)
+            .map((m) => ({ role: m.role, content: m.content })),
+          personalContext: fullContext2,
+        });
+        const detectedLang2 = detectLanguage(msg);
+        const tonedOffline = applyPersonalityTone(
+          offlineResult.response,
+          personalityTone2,
+        );
+        const finalOffline = applyLanguagePrefix(
+          tonedOffline,
+          detectedLang2,
+          msg,
+        );
+        const offlineMsg: LocalMessage = {
+          id: `ai-offline-${Date.now()}`,
+          role: "assistant",
+          content: `[Offline] ${finalOffline}`,
+          timestamp: Date.now(),
+        };
+        setLocalMessages((prev) => {
+          const updated = [...prev, offlineMsg];
+          if (updated.length > WINDOW_SIZE)
+            setWindowOffset(updated.length - WINDOW_SIZE);
+          return updated;
+        });
+        scrollToBottom(true);
+        if (offlineResult.learnedName) {
+          void updateMemory.mutateAsync({
+            key: "name",
+            value: offlineResult.learnedName,
+          });
+        }
+        setTimeout(() => setStatus("idle"), 1500);
+        return;
+      }
       await sendMessage.mutateAsync(msg);
       setStatus("responding");
 
+      // 117-E: Auto-detect reminder intent and add to Reminders tab
+      const autoReminderMatch = msg.match(
+        /remind(?:\s+me)?\s+(?:to\s+)?(.+?)\s+(?:at|on|by|in)\s+([\d:apmAPM ]+(?:am|pm)?(?:\s+(?:today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday))?)/i,
+      );
+      if (autoReminderMatch) {
+        const title = autoReminderMatch[1].trim();
+        const timeStr = autoReminderMatch[2].trim();
+        const dueDate = new Date();
+        const timeMatch = timeStr.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+        if (timeMatch) {
+          let hours = Number.parseInt(timeMatch[1]);
+          const mins = timeMatch[2] ? Number.parseInt(timeMatch[2]) : 0;
+          const meridiem = timeMatch[3]?.toLowerCase();
+          if (meridiem === "pm" && hours < 12) hours += 12;
+          if (meridiem === "am" && hours === 12) hours = 0;
+          dueDate.setHours(hours, mins, 0, 0);
+          if (dueDate.getTime() < Date.now())
+            dueDate.setDate(dueDate.getDate() + 1);
+          void createReminder
+            .mutateAsync({
+              title,
+              note: "Auto-detected from chat",
+              dueTime: BigInt(dueDate.getTime()) * 1_000_000n,
+            })
+            .catch(() => {});
+        }
+      }
+
       const tone = assistantSettings?.tone ?? ChatTone.friendly;
-      // Pass last 20 messages as context (not all, to avoid bloat)
       const contextHistory = allMessages.slice(-20).map((m) => ({
         role: m.role,
         content: m.content,
       }));
+      updatePersonalProfile(msg);
+      const personalContext = buildPersonalContext(personalProfile);
+      // 120-F: Detect language
+      const detectedLang = detectLanguage(msg);
+      // 120-D: Read personality tone
+      const personalityTone =
+        (localStorage.getItem("melina_personality_tone") as PersonalityTone) ??
+        "balanced";
+      // 120-C: Inject goals context
+      const fullContext = [personalContext, goalsContext]
+        .filter(Boolean)
+        .join("\n");
+
       const engineResult = generateMelinaResponse({
         message: msg,
         tone,
@@ -838,7 +920,20 @@ export default function ChatPage() {
         memoryEntries,
         pendingReminders: pendingRemindersData,
         chatHistory: contextHistory,
+        personalContext: fullContext,
       });
+      // Apply personality tone
+      const tonedResponse = applyPersonalityTone(
+        engineResult.response,
+        personalityTone,
+      );
+      // Apply language prefix
+      const finalResponse = applyLanguagePrefix(
+        tonedResponse,
+        detectedLang,
+        msg,
+      );
+      engineResult.response = finalResponse;
 
       const aiMsg: LocalMessage = {
         id: `ai-${Date.now()}`,
@@ -1033,11 +1128,10 @@ export default function ChatPage() {
       mr.onstop = () => {
         const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
         const url = URL.createObjectURL(blob);
-
         const voiceMsg: LocalMessage = {
-          id: `vn-${Date.now()}`,
+          id: `voice-${Date.now()}`,
           role: "user",
-          content: "[Voice note recorded]",
+          content: "[Voice Note]",
           timestamp: Date.now(),
           audioUrl: url,
           isVoiceNote: true,
@@ -1045,14 +1139,15 @@ export default function ChatPage() {
         };
         setLocalMessages((prev) => [...prev, voiceMsg]);
         scrollToBottom(true);
-
-        for (const t of stream.getTracks()) t.stop();
+        for (const t of stream.getTracks()) {
+          t.stop();
+        }
       };
 
       mr.start();
       setIsRecording(true);
     } catch {
-      toast.error("Microphone access denied");
+      toast.error("Microphone access denied.");
     }
   };
 
@@ -1119,7 +1214,10 @@ export default function ChatPage() {
       id: "new-reminder",
       label: "New Reminder",
       ocid: "command_palette.item.2",
-      action: () => setActiveTab("reminders"),
+      action: () => {
+        setActiveTab("reminders");
+        setSidebarOpen(true);
+      },
     },
     {
       id: "clear-chat",
@@ -1169,19 +1267,28 @@ export default function ChatPage() {
       id: "go-analytics",
       label: "Go to Analytics",
       ocid: "command_palette.item.6",
-      action: () => setActiveTab("stats"),
+      action: () => {
+        setActiveTab("stats");
+        setSidebarOpen(true);
+      },
     },
     {
       id: "go-schedule",
       label: "Open Schedule Planner",
       ocid: "command_palette.item.7",
-      action: () => setActiveTab("schedule"),
+      action: () => {
+        setActiveTab("schedule");
+        setSidebarOpen(true);
+      },
     },
     {
       id: "go-insights",
       label: "View Insights",
       ocid: "command_palette.item.8",
-      action: () => setActiveTab("insights"),
+      action: () => {
+        setActiveTab("insights");
+        setSidebarOpen(true);
+      },
     },
   ];
 
@@ -1225,13 +1332,12 @@ export default function ChatPage() {
                 transition={{ delay: 0.2, duration: 0.5 }}
                 className={`w-32 h-32 mx-auto rounded-full overflow-hidden border-2 border-primary/50 avatar-glow ${getExpressionClass(displayStatus)}`}
               >
-                <img
-                  src="/assets/generated/melina-avatar.dim_600x800.png"
-                  alt="Melina"
-                  className="w-full h-full object-cover object-top"
+                <MelinaAnimatedAvatar
+                  status={displayStatus}
+                  size="md"
+                  className="w-full h-full"
                 />
               </motion.div>
-
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -1244,7 +1350,6 @@ export default function ChatPage() {
                   ARIA Intelligence Online
                 </p>
               </motion.div>
-
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -1256,7 +1361,6 @@ export default function ChatPage() {
                   SYSTEM READY
                 </span>
               </motion.div>
-
               <motion.p
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -1270,40 +1374,105 @@ export default function ChatPage() {
         )}
       </AnimatePresence>
 
-      {/* Top Nav */}
-      <header className="flex items-center justify-between px-4 py-2 border-b border-border/50 bg-card/20 backdrop-blur-sm flex-shrink-0">
-        <div className="flex items-center gap-3">
-          {/* Mobile: avatar button to open sidebar sheet */}
-          <button
-            type="button"
-            onClick={() => setMobileSidebarOpen(true)}
-            className="w-6 h-6 rounded-full overflow-hidden border border-primary/40 flex-shrink-0 md:pointer-events-none"
-            aria-label="Open sidebar"
-            data-ocid="mobile.avatar_button"
-          >
-            <img
-              src="/assets/generated/melina-avatar.dim_600x800.png"
-              alt="Melina"
-              className="w-full h-full object-cover object-top"
+      {/* ── Sidebar Sheet (hamburger menu — all screen sizes) ─────────── */}
+      <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+        <SheetContent
+          side="left"
+          className="w-72 sm:w-80 p-0 bg-card/95 border-r border-border/60 flex flex-col backdrop-blur-md"
+          data-ocid="sidebar.sheet"
+        >
+          {/* Avatar section */}
+          <div className="relative flex-shrink-0">
+            <div className="relative overflow-hidden scanlines">
+              <div
+                className={`absolute inset-0 z-10 pointer-events-none rounded-sm ${getExpressionClass(displayStatus)}`}
+              />
+              <MelinaAnimatedAvatar
+                status={displayStatus}
+                size="lg"
+                className="w-full avatar-glow"
+                style={{ maxHeight: "220px" }}
+              />
+              <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-background/90 to-transparent" />
+              <div className="absolute top-2 left-2 font-mono text-[8px] text-primary/60 tracking-widest z-20">
+                ARIA·UNIT·001
+              </div>
+              <div className="absolute top-2 right-2 font-mono text-[8px] text-primary/60 tracking-widest z-20">
+                ONLINE
+              </div>
+              {/* Fullscreen button in sidebar */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSidebarOpen(false);
+                  setIsFullScreen(true);
+                }}
+                className="absolute bottom-8 right-2 z-20 p-1.5 rounded-sm border border-primary/30 text-primary/50 hover:text-primary hover:border-primary/60 bg-background/40 backdrop-blur-sm transition-all"
+                aria-label="Full-screen avatar"
+              >
+                <Maximize2 className="w-3 h-3" />
+              </button>
+              <div className="absolute bottom-3 left-0 right-8 text-center z-20">
+                <h2 className="font-display text-xl font-bold tracking-[0.4em] glow-cyan text-primary uppercase">
+                  {displayName.toUpperCase()}
+                </h2>
+              </div>
+            </div>
+            <div className="flex justify-center py-1.5 border-b border-border/30">
+              <StatusDot status={displayStatus} />
+            </div>
+          </div>
+          {/* All tabs */}
+          <div className="flex-1 overflow-hidden">
+            <SidebarTabs
+              messageCount={allMessages.length}
+              memoryCount={memoryEntries.length}
+              activeTab={activeTab}
+              onTabChange={(tab) => {
+                setActiveTab(tab);
+              }}
+              onSendToChat={(msg) => {
+                void handleSend(msg);
+              }}
             />
-          </button>
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-xs tracking-widest text-primary uppercase">
-              ARIA
-            </span>
-            <span className="font-mono text-[9px] text-muted-foreground ml-1 tracking-wider">
-              v6.0.0
-            </span>
-            {/* Message count badge */}
-            {allMessages.length > 0 && (
-              <span className="font-mono text-[8px] text-muted-foreground/40 tracking-wider hidden sm:inline">
-                [{totalMsgCount > 0 ? totalMsgCount : allMessages.length} msgs]
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* ── Top Header Bar ────────────────────────────────────────────── */}
+      <header
+        className="flex items-center justify-between px-3 py-2 border-b border-border/50 bg-card/20 backdrop-blur-sm flex-shrink-0"
+        data-ocid="chat.header"
+      >
+        {/* Left: avatar thumb + identity */}
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div
+            className={`w-9 h-9 rounded-full overflow-hidden border border-primary/50 flex-shrink-0 avatar-glow ${getExpressionClass(displayStatus)}`}
+          >
+            <MelinaAnimatedAvatar
+              status={displayStatus}
+              size="sm"
+              className="w-full h-full"
+            />
+          </div>
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-display text-sm font-bold tracking-[0.25em] text-primary glow-cyan uppercase">
+                {displayName.toUpperCase()}
               </span>
-            )}
+              {allMessages.length > 0 && (
+                <span className="font-mono text-[8px] text-muted-foreground/40 tracking-wider hidden sm:inline flex-shrink-0">
+                  [{totalMsgCount > 0 ? totalMsgCount : allMessages.length}{" "}
+                  msgs]
+                </span>
+              )}
+            </div>
+            <StatusDot status={displayStatus} />
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Right: controls */}
+        <div className="flex items-center gap-1 flex-shrink-0">
           {/* Speaking indicator */}
           <AnimatePresence>
             {speakingId !== null && (
@@ -1314,7 +1483,7 @@ export default function ChatPage() {
                 exit={{ opacity: 0, scale: 0.9 }}
                 transition={{ duration: 0.15 }}
                 onClick={stopSpeaking}
-                className="flex items-center gap-1.5 px-2 py-1 rounded-sm border border-primary/30 bg-primary/10 hover:bg-primary/20 transition-all"
+                className="flex items-center gap-1 px-2 py-1 rounded-sm border border-primary/30 bg-primary/10 hover:bg-primary/20 transition-all"
                 aria-label="Stop speaking"
                 data-ocid="chat.speaking_indicator"
               >
@@ -1330,7 +1499,7 @@ export default function ChatPage() {
                     />
                   ))}
                 </span>
-                <span className="font-mono text-[8px] tracking-[0.2em] text-primary uppercase">
+                <span className="font-mono text-[8px] tracking-[0.2em] text-primary uppercase hidden sm:inline">
                   SPEAKING
                 </span>
                 <VolumeX className="w-2.5 h-2.5 text-primary/70" />
@@ -1338,12 +1507,25 @@ export default function ChatPage() {
             )}
           </AnimatePresence>
 
+          {/* Fullscreen avatar */}
+          <button
+            type="button"
+            onClick={() => setIsFullScreen(true)}
+            className="h-7 w-7 flex items-center justify-center rounded-sm border border-primary/20 text-primary/50 hover:text-primary hover:border-primary/50 bg-background/30 transition-all"
+            aria-label="Full-screen avatar"
+            data-ocid="avatar.fullscreen_button"
+          >
+            <Maximize2 className="w-3 h-3" />
+          </button>
+
+          {/* Username */}
           {userProfile && (
-            <span className="font-mono text-[10px] text-muted-foreground tracking-wider hidden sm:block">
+            <span className="font-mono text-[10px] text-muted-foreground tracking-wider hidden md:block px-1">
               {userProfile.username}
             </span>
           )}
 
+          {/* Command palette */}
           <Button
             type="button"
             variant="ghost"
@@ -1356,8 +1538,16 @@ export default function ChatPage() {
             <Keyboard className="w-3.5 h-3.5" />
           </Button>
 
+          {/* Wallpaper Picker */}
+          <WallpaperPicker current={chatWallpaper} onApply={setChatWallpaper} />
+
+          {/* Notification Hub */}
+          <NotificationHub />
+
+          {/* Settings */}
           <SettingsSheet />
 
+          {/* Logout */}
           <Button
             type="button"
             variant="ghost"
@@ -1366,115 +1556,42 @@ export default function ChatPage() {
             className="h-7 px-2 text-muted-foreground hover:text-destructive font-mono text-xs tracking-wider rounded-sm"
             data-ocid="nav.logout_button"
           >
-            <LogOut className="w-3.5 h-3.5 mr-1" />
-            <span className="hidden sm:inline">Disconnect</span>
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline ml-1">Exit</span>
+          </Button>
+
+          {/* Hamburger menu */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setSidebarOpen(true)}
+            className="h-7 w-7 p-0 text-muted-foreground/70 hover:text-primary rounded-sm border border-border/40 hover:border-primary/40 transition-all"
+            aria-label="Open menu"
+            data-ocid="nav.menu_button"
+          >
+            <Menu className="w-4 h-4" />
           </Button>
         </div>
       </header>
+      {/* Offline banner */}
+      <OfflineBanner />
 
-      {/* Mobile Sidebar Sheet */}
-      <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-        <SheetContent
-          side="left"
-          className="w-72 p-0 bg-card/95 border-r border-border/60 flex flex-col backdrop-blur-md"
-          data-ocid="mobile.sidebar_sheet"
-        >
-          <div className="relative flex-shrink-0">
-            <div className="relative overflow-hidden scanlines">
-              <div
-                className={`absolute inset-0 z-10 pointer-events-none rounded-sm ${getExpressionClass(displayStatus)}`}
-              />
-              <img
-                src="/assets/generated/melina-avatar.dim_600x800.png"
-                alt="Melina Avatar"
-                className="w-full object-cover avatar-glow"
-                style={{ maxHeight: "200px", objectPosition: "top" }}
-              />
-              <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-background/90 to-transparent" />
-              <div className="absolute top-2 left-2 font-mono text-[8px] text-primary/60 tracking-widest z-20">
-                ARIA·UNIT·001
-              </div>
-              <div className="absolute bottom-3 left-0 right-0 text-center z-20">
-                <h2 className="font-display text-lg font-bold tracking-[0.4em] glow-cyan text-primary uppercase">
-                  {displayName.toUpperCase()}
-                </h2>
-              </div>
-            </div>
-            <div className="flex justify-center py-1.5 border-b border-border/30">
-              <StatusDot status={displayStatus} />
-            </div>
-          </div>
-          <div className="flex-1 overflow-hidden">
-            <SidebarTabs
-              messageCount={allMessages.length}
-              memoryCount={memoryEntries.length}
-              activeTab={activeTab}
-              onTabChange={(tab) => {
-                setActiveTab(tab);
-              }}
-            />
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      {/* Main layout */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* ── Left Panel (hidden on mobile) ── */}
-        <aside className="hidden md:flex w-72 xl:w-80 flex-shrink-0 border-r border-border/50 flex-col bg-card/10 backdrop-blur-sm overflow-hidden">
-          {/* Avatar section */}
-          <div className="relative flex-shrink-0">
-            <div className="relative overflow-hidden scanlines">
-              <div
-                className={`absolute inset-0 z-10 pointer-events-none rounded-sm ${getExpressionClass(displayStatus)}`}
-              />
-              <img
-                src="/assets/generated/melina-avatar.dim_600x800.png"
-                alt="Melina Avatar"
-                className="w-full object-cover avatar-glow"
-                style={{ maxHeight: "240px", objectPosition: "top" }}
-              />
-              <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-background/90 to-transparent" />
-              <div className="absolute top-2 left-2 font-mono text-[8px] text-primary/60 tracking-widest z-20">
-                ARIA·UNIT·001
-              </div>
-              <div className="absolute top-2 right-2 font-mono text-[8px] text-primary/60 tracking-widest z-20">
-                ONLINE
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsFullScreen(true)}
-                className="absolute bottom-8 right-2 z-20 p-1.5 rounded-sm border border-primary/30 text-primary/50 hover:text-primary hover:border-primary/60 bg-background/40 backdrop-blur-sm transition-all"
-                aria-label="Full-screen avatar"
-                data-ocid="avatar.fullscreen_button"
-              >
-                <Maximize2 className="w-3 h-3" />
-              </button>
-              <div className="absolute bottom-3 left-0 right-8 text-center z-20">
-                <h2 className="font-display text-xl font-bold tracking-[0.4em] glow-cyan text-primary uppercase">
-                  {displayName.toUpperCase()}
-                </h2>
-              </div>
-            </div>
-            <div className="flex justify-center py-1.5 border-b border-border/30">
-              <StatusDot status={displayStatus} />
-            </div>
-          </div>
-          <SidebarTabs
-            messageCount={allMessages.length}
-            memoryCount={memoryEntries.length}
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-          />
-        </aside>
-
-        {/* ── Right Panel ── */}
-        <main className="flex-1 flex flex-col overflow-hidden relative">
-          {/* Chat area */}
+      {/* ── Main Chat Area ─────────────────────────────────────────────── */}
+      <main className="flex-1 flex flex-row overflow-hidden relative min-h-0">
+        {/* ── Avatar Sidebar (desktop only) ─────────────────────────── */}
+        <div className="hidden md:flex md:w-[38%] flex-shrink-0 flex-col border-r border-border/30 bg-black/20 relative overflow-hidden">
+          <Avatar3DSidebar status={status} />
+        </div>
+        {/* ── Chat Column ───────────────────────────────────────────── */}
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0 relative">
+          <ChatWallpaperOverlay config={chatWallpaper} />
+          {/* Messages ScrollArea */}
           <ScrollArea
             className="flex-1"
             ref={scrollRef as React.RefObject<HTMLDivElement>}
           >
-            <div className="p-4 space-y-3 min-h-full">
+            <div className="p-4 space-y-3 min-h-full max-w-4xl mx-auto">
               {historyLoading ? (
                 <div className="space-y-3" data-ocid="chat.loading_state">
                   {[1, 2, 3].map((i) => (
@@ -1591,16 +1708,16 @@ export default function ChatPage() {
                     >
                       {msg.role === "assistant" && (
                         <div className="w-6 h-6 rounded-full overflow-hidden border border-primary/30 flex-shrink-0 mb-1">
-                          <img
-                            src="/assets/generated/melina-avatar.dim_600x800.png"
-                            alt="Melina"
-                            className="w-full h-full object-cover object-top"
+                          <MelinaAnimatedAvatar
+                            status="idle"
+                            size="sm"
+                            className="w-full h-full"
                           />
                         </div>
                       )}
 
                       <div
-                        className={`max-w-[70%] space-y-1 ${
+                        className={`max-w-[75%] sm:max-w-[65%] space-y-1 ${
                           msg.role === "user" ? "items-end" : "items-start"
                         } flex flex-col`}
                       >
@@ -1713,10 +1830,10 @@ export default function ChatPage() {
                         data-ocid="chat.loading_state"
                       >
                         <div className="w-6 h-6 rounded-full overflow-hidden border border-primary/30 flex-shrink-0">
-                          <img
-                            src="/assets/generated/melina-avatar.dim_600x800.png"
-                            alt="Melina"
-                            className="w-full h-full object-cover object-top"
+                          <MelinaAnimatedAvatar
+                            status="thinking"
+                            size="sm"
+                            className="w-full h-full"
                           />
                         </div>
                         <div className="bubble-melina rounded-sm px-4 py-3 flex gap-1.5 items-center">
@@ -1774,14 +1891,31 @@ export default function ChatPage() {
             )}
           </AnimatePresence>
 
-          {/* Notification Advisor (between messages and input) */}
+          {/* Notification Advisor */}
+          {/* 117-E: Reminder & Calendar Banner Notifications */}
+          <ReminderBanner
+            reminders={reminders}
+            calendarEvents={calendarEvents}
+          />
+
           <NotificationAdvisor
             notificationsEnabled={
               assistantSettings?.notificationsEnabled ?? true
             }
           />
 
-          {/* Input area */}
+          {/* Wake Word */}
+          {/* Phase 118-A: Floating Bubble */}
+          <FloatingBubble
+            visible={bubbleRestored || (!!activeTab && activeTab !== "chat")}
+            messages={localMessages}
+            onSend={(text) => {
+              void handleSend(text);
+            }}
+            isSending={sendMessage.isPending}
+            currentTab={activeTab}
+            onInjectMessage={handleBubbleInject}
+          />
           <WakeWord
             onActivate={() => {
               if (inputRef.current) {
@@ -1795,8 +1929,10 @@ export default function ChatPage() {
             isRecording={isRecording}
             disabled={sendMessage.isPending}
           />
+
+          {/* ── Input Bar ──────────────────────────────────────────────── */}
           <div className="flex-shrink-0 border-t border-border/50 bg-card/10 backdrop-blur-sm p-3">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 max-w-4xl mx-auto">
               {/* Clear button */}
               <AlertDialog>
                 <AlertDialogTrigger asChild>
@@ -1925,7 +2061,7 @@ export default function ChatPage() {
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: "auto" }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="mt-1.5 flex items-center gap-1.5 overflow-hidden"
+                  className="mt-1.5 flex items-center gap-1.5 overflow-hidden max-w-4xl mx-auto"
                 >
                   <MicOff className="w-3 h-3 text-destructive/70" />
                   <span className="font-mono text-[10px] text-destructive/80 tracking-wider">
@@ -1935,99 +2071,11 @@ export default function ChatPage() {
               )}
             </AnimatePresence>
           </div>
-        </main>
-      </div>
-
-      {/* Mobile Bottom Navigation */}
-      <nav className="flex md:hidden flex-shrink-0 border-t border-border/50 bg-card/30 backdrop-blur-md">
-        {[
-          {
-            id: "chat",
-            label: "Chat",
-            icon: MessageSquare,
-            ocid: "mobile.nav_chat_button",
-            action: () => {
-              setMobileActiveNavTab("chat");
-              setMobileSidebarOpen(false);
-            },
-          },
-          {
-            id: "dashboard",
-            label: "Dash",
-            icon: Gauge,
-            ocid: "mobile.nav_dashboard_button",
-            action: () => {
-              setMobileActiveNavTab("dashboard");
-              setActiveTab("dashboard");
-              setMobileSidebarOpen(true);
-            },
-          },
-          {
-            id: "reminders",
-            label: "Remind",
-            icon: Clock,
-            ocid: "mobile.nav_reminders_button",
-            action: () => {
-              setMobileActiveNavTab("reminders");
-              setActiveTab("reminders");
-              setMobileSidebarOpen(true);
-            },
-          },
-          {
-            id: "schedule",
-            label: "Sched",
-            icon: CalendarDays,
-            ocid: "mobile.nav_schedule_button",
-            action: () => {
-              setMobileActiveNavTab("schedule");
-              setActiveTab("schedule");
-              setMobileSidebarOpen(true);
-            },
-          },
-          {
-            id: "habits",
-            label: "Habits",
-            icon: Activity,
-            ocid: "mobile.nav_habits_button",
-            action: () => {
-              setMobileActiveNavTab("habits");
-              setActiveTab("habits");
-              setMobileSidebarOpen(true);
-            },
-          },
-          {
-            id: "insights",
-            label: "Insight",
-            icon: Sparkles,
-            ocid: "mobile.nav_insights_button",
-            action: () => {
-              setMobileActiveNavTab("insights");
-              setActiveTab("insights");
-              setMobileSidebarOpen(true);
-            },
-          },
-        ].map(({ id, label, icon: Icon, ocid, action }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={action}
-            className={`flex-1 flex flex-col items-center justify-center py-2 gap-0.5 transition-all ${
-              mobileActiveNavTab === id
-                ? "text-primary bg-primary/10"
-                : "text-muted-foreground/50 hover:text-muted-foreground"
-            }`}
-            data-ocid={ocid}
-          >
-            <Icon className="w-4 h-4" />
-            <span className="font-mono text-[8px] tracking-wider uppercase">
-              {label}
-            </span>
-          </button>
-        ))}
-      </nav>
+        </div>
+      </main>
 
       {/* Footer */}
-      <footer className="hidden md:block flex-shrink-0 border-t border-border/30 py-1 px-4 text-center bg-card/5">
+      <footer className="flex-shrink-0 border-t border-border/30 py-1 px-4 text-center bg-card/5">
         <p className="font-mono text-[9px] text-muted-foreground/30 tracking-wider">
           © {new Date().getFullYear()}. Built with ♥ using{" "}
           <a

@@ -483,3 +483,76 @@
     0 0 20px oklch(0.55 0.22 25 / 0.1),
     inset 0 0 30px oklch(0.55 0.22 25 / 0.03);
 }
+
+/* ─── Phase 120-A: Layered Avatar Animations ─── */
+
+@keyframes avatar-sway {
+  0%, 100% { transform: translateX(0) rotate(0deg); }
+  25% { transform: translateX(-1.5px) rotate(-0.15deg); }
+  75% { transform: translateX(1.5px) rotate(0.15deg); }
+}
+
+@keyframes avatar-think {
+  0%, 100% { transform: translateX(0) translateY(0); }
+  30% { transform: translateX(-1px) translateY(-0.5px); }
+  60% { transform: translateX(0.5px) translateY(0.5px); }
+}
+
+@keyframes avatar-respond {
+  0%, 100% { transform: scale(1) translateY(0); }
+  50% { transform: scale(1.005) translateY(-0.5px); }
+}
+
+@keyframes avatar-alert {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-1.5px); }
+  40% { transform: translateX(1.5px); }
+  60% { transform: translateX(-1px); }
+  80% { transform: translateX(1px); }
+}
+
+@keyframes lipsync-glow {
+  0%, 100% { opacity: 0.3; transform: scaleX(1) scaleY(1); }
+  50% { opacity: 0.7; transform: scaleX(1.1) scaleY(1.3); }
+}
+
+@keyframes blink {
+  0%, 100% { transform: scaleY(0); }
+  50% { transform: scaleY(1); }
+}
+
+.animate-avatar-sway { animation: avatar-sway 4s ease-in-out infinite; }
+.animate-avatar-think { animation: avatar-think 1.2s ease-in-out infinite; }
+.animate-avatar-respond { animation: avatar-respond 0.6s ease-in-out infinite; }
+.animate-avatar-alert { animation: avatar-alert 0.4s ease-in-out 3; }
+.animate-lipsync-glow { animation: lipsync-glow 0.4s ease-in-out infinite; }
+
+/* Blink layer: normally invisible, .blink-active makes it flash */
+.avatar-blink-layer {
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(20, 10, 5, 0.6) 40%,
+    rgba(20, 10, 5, 0.6) 60%,
+    transparent 100%
+  );
+  transform: scaleY(0);
+  transform-origin: center;
+  transition: transform 0.05s ease-in;
+}
+.avatar-blink-layer.blink-active {
+  transform: scaleY(1);
+  transition: transform 0.08s ease-out;
+}
+
+/* Scanline overlay for avatar */
+.avatar-scanline {
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.04) 2px,
+    rgba(0, 0, 0, 0.04) 4px
+  );
+  pointer-events: none;
+}

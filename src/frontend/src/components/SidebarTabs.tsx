@@ -28,15 +28,22 @@ import {
   useUserProfile,
 } from "../hooks/useQueries";
 import AnalyticsPanel from "./AnalyticsPanel";
+import AvatarViewer3D from "./AvatarViewer3D";
+import CalendarIntegration from "./CalendarIntegration";
 import DashboardPanel from "./DashboardPanel";
+import GamingIntegration from "./GamingIntegration";
+import GoalsEngine from "./GoalsEngine";
 import HabitAnalytics from "./HabitAnalytics";
 import HabitsPanel from "./HabitsPanel";
 import InsightsPanel from "./InsightsPanel";
+import LocationServices from "./LocationServices";
 import MemoryPanel from "./MemoryPanel";
+import { ConnectedProfileView } from "./PersonalIntelligence";
 import SchedulePlanner from "./SchedulePlanner";
+import SmartHome from "./SmartHome";
 import TaskAutomation from "./TaskAutomation";
 
-// ── Integration grid ──────────────────────────────────────────────
+// ── Integration grid ────────────────────────────────────────────────
 type IntegrationKey = keyof IntegrationStatus;
 
 interface IntegrationCardProps {
@@ -417,7 +424,7 @@ function ProfileTab() {
   );
 }
 
-// ── Integrations tab ──────────────────────────────────────────────
+// ── Integrations tab ────────────────────────────────────────────────
 function IntegrationsTab() {
   const { data: status } = useIntegrationStatus();
   const setIntegration = useSetIntegration();
@@ -491,21 +498,26 @@ function IntegrationsTab() {
           />
         ))}
       </div>
+      <div className="mt-3 pt-3 border-t border-border/20">
+        <CalendarIntegration />
+      </div>
     </div>
   );
 }
 
-// ── Main SidebarTabs ──────────────────────────────────────────────
+// ── Main SidebarTabs ────────────────────────────────────────────
 export default function SidebarTabs({
   messageCount,
   memoryCount,
   activeTab,
   onTabChange,
+  onSendToChat,
 }: {
   messageCount: number;
   memoryCount: number;
   activeTab?: string;
   onTabChange?: (tab: string) => void;
+  onSendToChat?: (msg: string) => void;
 }) {
   const tabClass =
     "flex-1 h-full rounded-none text-[5.5px] font-mono tracking-[0.03em] uppercase px-0 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none border-r border-border/20";
@@ -600,6 +612,48 @@ export default function SidebarTabs({
         >
           Auto
         </TabsTrigger>
+        <TabsTrigger
+          value="you"
+          className={tabClass}
+          data-ocid="sidebar.you_tab"
+        >
+          You
+        </TabsTrigger>
+        <TabsTrigger
+          value="smart-home"
+          className={tabClass}
+          data-ocid="sidebar.smarthome_tab"
+        >
+          Home
+        </TabsTrigger>
+        <TabsTrigger
+          value="gaming"
+          className={tabClass}
+          data-ocid="sidebar.gaming_tab"
+        >
+          Game
+        </TabsTrigger>
+        <TabsTrigger
+          value="location"
+          className={tabClass}
+          data-ocid="sidebar.location_tab"
+        >
+          Loc
+        </TabsTrigger>
+        <TabsTrigger
+          value="goals"
+          className={tabClass}
+          data-ocid="sidebar.goals_tab"
+        >
+          Goals
+        </TabsTrigger>
+        <TabsTrigger
+          value="avatar3d"
+          className={tabClass}
+          data-ocid="sidebar.avatar3d_tab"
+        >
+          3D
+        </TabsTrigger>
       </TabsList>
 
       <div className="flex-1 overflow-y-auto">
@@ -645,6 +699,24 @@ export default function SidebarTabs({
 
         <TabsContent value="automate" className="m-0 p-2">
           <TaskAutomation />
+        </TabsContent>
+        <TabsContent value="you" className="m-0 p-2">
+          <ConnectedProfileView />
+        </TabsContent>
+        <TabsContent value="smart-home" className="m-0 p-2">
+          <SmartHome />
+        </TabsContent>
+        <TabsContent value="gaming" className="m-0 p-2">
+          <GamingIntegration />
+        </TabsContent>
+        <TabsContent value="location" className="m-0 p-0 h-full">
+          <LocationServices onSendToChat={onSendToChat ?? (() => {})} />
+        </TabsContent>
+        <TabsContent value="goals" className="m-0 p-2">
+          <GoalsEngine />
+        </TabsContent>
+        <TabsContent value="avatar3d" className="m-0 p-2 h-full">
+          <AvatarViewer3D />
         </TabsContent>
       </div>
 

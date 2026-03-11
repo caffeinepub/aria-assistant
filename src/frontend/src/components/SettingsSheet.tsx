@@ -37,6 +37,9 @@ export default function SettingsSheet() {
     () => localStorage.getItem("aria_auto_speak") === "true",
   );
   const [open, setOpen] = useState(false);
+  const [personalityTone, setPersonalityTone] = useState<string>(
+    () => localStorage.getItem("melina_personality_tone") ?? "balanced",
+  );
 
   // Sync from backend when settings load
   useEffect(() => {
@@ -67,6 +70,11 @@ export default function SettingsSheet() {
         newValue: v ? "true" : "false",
       }),
     );
+  };
+
+  const handleToneChange = (t: string) => {
+    setPersonalityTone(t);
+    localStorage.setItem("melina_personality_tone", t);
   };
 
   const handleSave = async () => {
@@ -315,6 +323,62 @@ export default function SettingsSheet() {
                     className="data-[state=checked]:bg-primary"
                     data-ocid="settings.autospeak_switch"
                   />
+                </div>
+              </section>
+
+              {/* ── Personality Tone Section ── */}
+              <section className="space-y-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-3 h-px bg-primary/50" />
+                  <span className="font-mono text-[9px] tracking-[0.25em] uppercase text-primary/60">
+                    Personality Tone
+                  </span>
+                  <div className="flex-1 h-px bg-primary/10" />
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(
+                    [
+                      {
+                        id: "formal",
+                        label: "Formal",
+                        desc: "Professional, structured",
+                      },
+                      {
+                        id: "balanced",
+                        label: "Balanced",
+                        desc: "Default behaviour",
+                      },
+                      {
+                        id: "playful",
+                        label: "Playful",
+                        desc: "Fun, casual, emoji",
+                      },
+                      {
+                        id: "direct",
+                        label: "Direct",
+                        desc: "Concise, no filler",
+                      },
+                    ] as const
+                  ).map(({ id, label, desc }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => handleToneChange(id)}
+                      className={`p-2 rounded-sm border text-left transition-all ${
+                        personalityTone === id
+                          ? "border-primary/60 bg-primary/10 text-primary"
+                          : "border-border/40 bg-card/10 text-muted-foreground/60 hover:border-border/60 hover:text-foreground/70"
+                      }`}
+                      data-ocid={`settings.tone_${id}_button`}
+                    >
+                      <p className="font-mono text-[9px] tracking-wider uppercase">
+                        {label}
+                      </p>
+                      <p className="font-body text-[9px] mt-0.5 opacity-70">
+                        {desc}
+                      </p>
+                    </button>
+                  ))}
                 </div>
               </section>
 
