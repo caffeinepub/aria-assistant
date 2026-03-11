@@ -1586,8 +1586,37 @@ export default function ChatPage() {
       {/* ── Main Chat Area ─────────────────────────────────────────────── */}
       <main className="flex-1 flex flex-row overflow-hidden relative min-h-0">
         {/* ── Avatar Sidebar (desktop only) ─────────────────────────── */}
-        <div className="hidden md:flex md:w-[38%] flex-shrink-0 flex-col border-r border-border/30 bg-black/20 relative overflow-hidden">
-          <Avatar3DSidebar status={status} />
+        <div className="hidden md:flex md:w-[38%] flex-shrink-0 flex-col border-r border-border/30 bg-black/10 relative overflow-hidden">
+          {/* Static Melina photo panel */}
+          <div className="relative w-full h-full flex flex-col">
+            <img
+              src="/assets/generated/melina-avatar.dim_600x800.png"
+              alt="Melina"
+              className="absolute inset-0 w-full h-full object-cover object-top"
+            />
+            {/* HUD overlay */}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/30 pointer-events-none" />
+            {/* Top label */}
+            <div className="relative z-10 flex items-center justify-between px-4 py-3">
+              <span className="text-[10px] font-mono tracking-[0.2em] text-primary/80 uppercase">
+                AVATAR VIEWER
+              </span>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`text-[9px] font-mono tracking-widest uppercase ${status === "idle" ? "text-green-400" : status === "thinking" ? "text-yellow-400" : "text-primary"}`}
+                >
+                  {status === "idle"
+                    ? "STANDBY"
+                    : status === "thinking"
+                      ? "THINKING"
+                      : "RESPONDING"}
+                </span>
+                <span
+                  className={`w-2 h-2 rounded-full animate-pulse ${status === "idle" ? "bg-green-400" : status === "thinking" ? "bg-yellow-400" : "bg-primary"}`}
+                />
+              </div>
+            </div>
+          </div>
         </div>
         {/* ── Chat Column ───────────────────────────────────────────── */}
         <div className="flex-1 flex flex-col overflow-hidden min-w-0 min-h-0 relative">

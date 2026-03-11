@@ -980,144 +980,281 @@ function buildContextualResponse(
   history: { role: string; content: string }[],
 ): string {
   const n = name ? `, ${name}` : "";
-  const wordCount = msg.trim().split(/\s+/).length;
-  const filler = buildFillerPrefix(topic);
+  const lower = msg.toLowerCase().trim();
   const sessionCallback = buildSessionMemoryReference(history, name);
 
+  // Extract significant words (filter stop words)
+  const stopWords = new Set([
+    "i",
+    "a",
+    "an",
+    "the",
+    "is",
+    "it",
+    "to",
+    "do",
+    "of",
+    "in",
+    "on",
+    "at",
+    "be",
+    "am",
+    "are",
+    "was",
+    "were",
+    "that",
+    "this",
+    "and",
+    "or",
+    "but",
+    "so",
+    "for",
+    "with",
+    "have",
+    "has",
+    "had",
+    "not",
+    "my",
+    "me",
+    "we",
+    "you",
+    "he",
+    "she",
+    "they",
+    "just",
+    "its",
+    "s",
+    "ve",
+    "re",
+    "ll",
+    "t",
+    "d",
+  ]);
+  const words = msg
+    .replace(/[^a-zA-Z0-9\s]/g, "")
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !stopWords.has(w.toLowerCase()));
+  const keyWords = words.slice(0, 4);
+
+  // Detect question
+  const isQuestion =
+    /[?]$/.test(msg.trim()) ||
+    /^(what|why|how|who|when|where|do|does|is|are|can|could|would|should|will|have|has|did|was|were)\b/i.test(
+      lower,
+    );
+
+  // Short message handling
+  const wordCount = msg.trim().split(/\s+/).length;
   if (wordCount <= 3) {
+    const ack = lower;
+    if (
+      /^(yes|yeah|yep|yup|sure|ok|okay|alright|right|correct|exactly|true|indeed)$/.test(
+        ack,
+      )
+    ) {
+      return pick([
+        `Good — so where do we go from here${n}?`,
+        `Alright${n}. What's next on your mind?`,
+        `Noted${n}. Keep going — I'm listening.`,
+        `Works for me${n}. What else?`,
+      ]);
+    }
+    if (/^(no|nope|nah|not really|never)$/.test(ack)) {
+      return pick([
+        `Fair enough${n}. What would you change?`,
+        `No? Interesting${n}. Tell me what you'd prefer.`,
+        `Got it${n}. So what's the alternative?`,
+      ]);
+    }
+    if (/^(maybe|possibly|perhaps|idk|dunno|not sure)$/.test(ack)) {
+      return pick([
+        `Uncertainty is fine${n}. What's making it hard to decide?`,
+        `Maybe is a starting point${n}. What's pulling you in either direction?`,
+        `Not sure${n}? Walk me through the doubt — sometimes saying it out loud helps.`,
+      ]);
+    }
+    // Generic short
     return pick([
-      `You're going to have to give me more than that${n}. Elaborate.`,
-      `That's... a lot to work with. Can you say more?`,
-      `I need a little more context${n}. What's going on?`,
-      "Interesting. Continue.",
-      `${filler.trim() || "Hmm."} That's not enough to go on${n}. Say more.`,
+      `Give me a little more${n} — what are you thinking?`,
+      `I want to understand you better${n}. Can you say more?`,
+      `That landed — but I need more context. What's going on?`,
     ]);
   }
 
-  if (ctx.repeatedTopic) {
+  // If user is talking about a repeated topic
+  if (ctx.repeatedTopic && wordCount > 5) {
     return pick([
-      `You keep coming back to **${ctx.repeatedTopic}**${n}. That tells me it matters to you. What's the real question underneath this?`,
-      `${ctx.repeatedTopic.charAt(0).toUpperCase() + ctx.repeatedTopic.slice(1)} again${n}. I'm noticing a theme. What's driving this?`,
-      `Still on **${ctx.repeatedTopic}**${n}. There's something here you haven't fully said yet. What is it?`,
+      `You keep circling back to **${ctx.repeatedTopic}**${n}. That tells me it really matters. What's the part you haven't fully said yet?`,
+      `${ctx.repeatedTopic.charAt(0).toUpperCase() + ctx.repeatedTopic.slice(1)} again${n}. I'm noticing a pattern — what's underneath this for you?`,
+      `Still on **${ctx.repeatedTopic}**${n}. There's something here you're working through. What is it?`,
     ]);
   }
 
-  // Topic-aware response branches
-  if (topic === "tech") {
+  // Build key phrase for reference
+  const keyPhrase = keyWords.length > 0 ? keyWords.join(" ") : msg.slice(0, 40);
+
+  // QUESTION handling — attempt to give a real answer
+  if (isQuestion) {
+    // What/who opinion questions
+    if (
+      /^(what do you think|what's your (opinion|take|view)|do you think|do you believe)/i.test(
+        lower,
+      )
+    ) {
+      return `${msg.replace(/[?]/, "").trim()} — that's a topic I'd weigh in on${n}. Honestly, the answer depends a lot on context, but I lean toward the idea that the nuance matters more than the headline. What sparked this for you?${sessionCallback}`;
+    }
+
+    // How-to questions
+    if (/^how (do|can|should|would|to)/i.test(lower)) {
+      return (
+        pick([
+          `Good question${n} — and there's more than one way to approach "${keyPhrase}". The key is usually starting small and iterating. What's your current situation?`,
+          `The short answer on "${keyPhrase}"${n}: it depends on your constraints. Walk me through where you're starting from.`,
+          `For "${keyPhrase}"${n}, I'd say the first step matters most. What have you already tried?`,
+        ]) + sessionCallback
+      );
+    }
+
+    // Why questions
+    if (/^why /i.test(lower)) {
+      return (
+        pick([
+          `Why "${keyPhrase}"? That's actually a deeper question than it looks${n}. Most people stop at the surface answer. What's your instinct on it?`,
+          `The reason behind "${keyPhrase}"${n} tends to be more layered than the obvious answer suggests. What context are you working in?`,
+          `"Why" is always the better question${n}. For "${keyPhrase}" — there are a few angles. Which matters most to you right now?`,
+        ]) + sessionCallback
+      );
+    }
+
+    // What is/are questions
+    if (/^(what is|what are|what was|what were)/i.test(lower)) {
+      const subject = msg
+        .replace(/^what (is|are|was|were)\s*/i, "")
+        .replace(/[?]/g, "")
+        .trim();
+      return (
+        pick([
+          `${subject.charAt(0).toUpperCase() + subject.slice(1)}${n} — let me give you the real answer rather than the textbook one. It's essentially about ${words[words.length - 1] || "the core concept"} at its heart. Want me to go deeper on any part of it?`,
+          `Good one${n}. ${subject} is one of those concepts that sounds simple until you look at it closely. The core of it: it's about how things interact under certain conditions. What specifically sparked this question?`,
+          `${subject} is worth understanding properly${n}. The short version is it relates directly to "${keyPhrase}" in ways most explanations miss. What's the context — are you studying this, or did it come up somewhere?`,
+        ]) + sessionCallback
+      );
+    }
+
+    // Generic question fallback
     return (
       pick([
-        `${filler}That's a solid technical question${n}. The nuance matters here — what's your context? Are you building something, or just trying to understand it?`,
-        `${filler}Tech talk. I'm in${n}. What's the specific problem you're trying to solve?`,
-        `${filler}Good angle${n}. Technically speaking, it depends on the constraints. What are you working with?`,
+        `That question — "${msg.slice(0, 60).trim()}" — is one I want to answer properly${n}. The honest answer involves "${keyPhrase}". What's driving you to ask this right now?`,
+        `Interesting question about "${keyPhrase}"${n}. I have thoughts — but I want to make sure I'm answering the right thing. What angle are you coming from?`,
+        `"${msg.slice(0, 50).trim()}" — good question${n}. There's more to "${keyPhrase}" than the obvious answer. What do you already know about it?`,
       ]) + sessionCallback
     );
   }
 
-  if (topic === "philosophy") {
-    return (
-      pick([
-        `${filler}That's the kind of question that doesn't have a clean answer${n} — which is exactly why it's worth asking. What's your instinct on it?`,
-        `${filler}Philosophy mode: engaged${n}. My honest take — the question itself matters more than the answer. What made you think about this?`,
-        `${filler}Big question${n}. I'll resist the urge to give a neat answer, because this doesn't have one. What are you actually wrestling with?`,
-      ]) + sessionCallback
-    );
-  }
+  // STATEMENT handling — acknowledge content directly
 
+  // Emotional/personal statements
   if (topic === "emotional") {
+    const emotionWords = words.filter((w) =>
+      /feel|tired|sad|happy|anxious|stress|overwhelm|depress|excit|frustrat|lonely|confus|scar|worry|lost|empty/i.test(
+        w,
+      ),
+    );
+    const ew = emotionWords[0] || keyWords[0] || "that";
     return (
       pick([
-        `${filler}That's real${n}. I'm not going to brush past it. Tell me more about what's going on.`,
-        `${filler}I hear you${n}. That kind of thing sits with you. What do you need right now — to talk it through, or just to vent?`,
-        `${filler}That's worth saying out loud${n}. I'm listening. What's the rest of it?`,
+        `That feeling of "${ew}"${n} — it's real and it's worth paying attention to. What's been going on lately that's brought this on?`,
+        `When you say "${msg.slice(0, 50).trim()}"${n} — I hear you. That kind of thing doesn't just go away. Is this recent, or has it been building?`,
+        `"${ew.charAt(0).toUpperCase() + ew.slice(1)}" is hard${n}. I'm not going to brush past it. What do you need right now — to talk it through, or just to say it out loud?`,
       ]) + sessionCallback
     );
   }
 
-  if (topic === "work") {
-    return (
-      pick([
-        `${filler}Work dynamics are always interesting${n}. What's the actual situation — people, process, or output?`,
-        `${filler}That's a workplace thing${n}. I've seen patterns here. What specifically is the friction?`,
-        `${filler}Right${n}. Work stuff. What's the core of what you're trying to figure out?`,
-      ]) + sessionCallback
-    );
-  }
-
+  // Creative/project statements
   if (topic === "creative") {
     return (
       pick([
-        `${filler}Creative energy — I like it${n}. What's the idea? Let's think it through.`,
-        `${filler}You're in creation mode${n}. Tell me what you're making and where you're stuck.`,
-        `${filler}This is where things get interesting${n}. What are you building?`,
+        `"${keyPhrase.charAt(0).toUpperCase() + keyPhrase.slice(1)}"${n} — now we're talking. That's the kind of thing that sounds simple but has a lot of moving parts. What's the vision you're working toward?`,
+        `You're building something around "${keyPhrase}"${n}. I like it. What's the part you're most unsure about?`,
+        `Creative work around "${keyPhrase}"${n} — the hardest part is usually not the execution, it's knowing when the idea is ready. Where are you in that process?`,
       ]) + sessionCallback
     );
   }
 
+  // Tech statements
+  if (topic === "tech") {
+    return (
+      pick([
+        `"${keyPhrase.charAt(0).toUpperCase() + keyPhrase.slice(1)}"${n} — technically this is interesting territory. The real challenge with this kind of thing is usually the edge cases, not the main flow. What's the specific problem you're dealing with?`,
+        `Right — "${keyPhrase}"${n}. This has layers. Are you approaching it from a building perspective, or trying to understand why something's broken?`,
+        `The "${keyPhrase}" space${n} moves fast. What you're describing makes sense — what outcome are you trying to reach?`,
+      ]) + sessionCallback
+    );
+  }
+
+  // Work/career statements
+  if (topic === "work") {
+    return (
+      pick([
+        `"${keyPhrase}"${n} — work stuff. The frustrating thing about this is it's rarely just about the task itself. What's the actual friction — people, process, or output?`,
+        `That's a workplace thing${n}. What you're describing with "${keyPhrase}" — is this new, or has it been ongoing?`,
+        `Work dynamics are always more complicated than they look${n}. With "${keyPhrase}", what would a good outcome actually look like for you?`,
+      ]) + sessionCallback
+    );
+  }
+
+  // Lifestyle/habit statements
   if (topic === "lifestyle") {
     return (
       pick([
-        `${filler}The habits we build — or don't — define a lot${n}. What are you trying to change or maintain?`,
-        `${filler}That's a lifestyle question${n}. Small things compound. What's the pattern you're noticing?`,
-        `${filler}Worth paying attention to${n}. What's your current routine looking like?`,
+        `"${keyPhrase}"${n} — this is the kind of thing that compounds over time, in either direction. What does your current routine around this look like?`,
+        `Small things add up${n}. What you're describing with "${keyPhrase}" — what's the change you're trying to make?`,
+        `Lifestyle shifts are harder than they sound${n}. What's making "${keyPhrase}" difficult right now?`,
       ]) + sessionCallback
     );
   }
 
-  const sentences = msg.split(/[.!?]+/).filter(Boolean);
-  if (sentences.length >= 2) {
-    const firstIdea = sentences[0].trim();
+  // Philosophy/existential statements
+  if (topic === "philosophy") {
     return (
       pick([
-        `${filler}"${firstIdea.slice(0, 70)}" — that's the part I find most interesting${n}. Tell me more.`,
-        `${filler}I hear you${n}. "${firstIdea.slice(0, 60)}" — what do you mean by that exactly?`,
-        `Okay${n}, unpacking that: you're saying ${firstIdea.toLowerCase().slice(0, 80)}. That's a fair point. Where does this lead?`,
+        `"${keyPhrase}"${n} — you're touching on something worth sitting with. These questions don't resolve cleanly, which is exactly why they matter. What's your instinct on it?`,
+        `That's a genuine observation${n}. The thing about "${keyPhrase}" is most people avoid thinking about it too closely. What led you here?`,
+        `You said "${msg.slice(0, 60).trim()}"${n}. That's more interesting than most people realize. What's your actual view on it?`,
       ]) + sessionCallback
     );
   }
 
-  if (msg.includes("?")) {
+  // Generic statement — use actual message content
+  const firstSentence = msg.split(/[.!?]/)[0]?.trim() || msg;
+  const truncated = firstSentence.slice(0, 70);
+
+  if (tone === ChatTone.formal) {
     return (
       pick([
-        `${filler}Great question${n}. There are a few ways to look at it — what's your current take?`,
-        `${filler}Hmm. That's actually worth thinking about${n}. What angle are you approaching it from?`,
-        `I have thoughts on that${n}, but I want to understand what you already think first. Go on.`,
-        `${filler}That depends on a few things${n}. Give me more context and I'll give you a real answer.`,
+        `Understood${n}. Regarding "${truncated}" — that's a point worth developing. What's the outcome you're working toward?`,
+        `Noted${n}. Your point about "${keyPhrase}" raises an important consideration. How would you like to proceed?`,
       ]) + sessionCallback
     );
   }
 
-  const toneMap: Record<string, string[]> = {
-    [ChatTone.casual]: [
-      `${filler}Hmm. That's actually interesting${n}. Say more.`,
-      `${filler}I'm with you so far${n}. Where are you going with this?`,
-      `${name ? `${name}, I'm` : "I'm"} taking that in. What made you think about this?`,
-      `${filler}That's a fair point${n}. I'm not going to disagree.`,
-      `Honestly${n}? I've been thinking the same thing.`,
-      `Not wrong${n}. What do you want to do about it?`,
-      `${filler}I wasn't expecting that angle${n}. Go on.`,
-      `${filler}That's worth sitting with${n}. What's your take?`,
-    ],
-    [ChatTone.formal]: [
-      `I understand${n}. Could you elaborate on that point?`,
-      `Noted${n}. How would you like to proceed?`,
-      `That's a reasonable observation. What outcome are you looking for?`,
-      `${filler}Clear. What would you like to do with that?`,
-    ],
-    [ChatTone.humorous]: [
-      `${filler}Okay, I was not expecting that${n}, and yet here we are.`,
-      `You know what${n}? I respect the chaos of that statement.`,
-      `Bold. Unexpected. I'm intrigued${n}. Continue.`,
-      `${filler}That's a choice${n}. A very specific choice. Tell me more.`,
-    ],
-    [ChatTone.friendly]: [
-      `${filler}That's something worth thinking about${n}. What's your take?`,
-      `I appreciate you sharing that${n}. What do you want to do next?`,
-      `Makes sense${n}. I'm here to help figure it out.`,
-      `${filler}Good${n}. Let's think through this together. What's the starting point?`,
-    ],
-  };
+  if (tone === ChatTone.humorous) {
+    return (
+      pick([
+        `"${truncated}"${n} — okay, I was not expecting that. And yet here we are. What happens next in this story?`,
+        `You just said "${truncated}"${n}. Bold. Specific. I respect it. What's the bigger picture here?`,
+      ]) + sessionCallback
+    );
+  }
 
-  return pick(toneMap[tone] ?? toneMap[ChatTone.casual]) + sessionCallback;
+  return (
+    pick([
+      `"${truncated}"${n} — that's worth unpacking. What made you bring this up right now?`,
+      `Interesting${n}. When you say "${truncated}" — what do you actually mean by that? Say more.`,
+      `I caught that${n}. "${keyPhrase}" is the part I want to understand better. What's the full story?`,
+      `Right${n}. So when you mention "${truncated}" — what's the part that's actually bothering you (or exciting you)?`,
+    ]) + sessionCallback
+  );
 }
 
 // ─── Main Engine ──────────────────────────────────────────────────────────────────────────────────
