@@ -17,13 +17,13 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   ArrowDown,
   ChevronUp,
   Copy,
+  ImagePlus,
   Keyboard,
   LogOut,
   Maximize2,
@@ -480,6 +480,8 @@ export default function ChatPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const alertShownRef = useRef(false);
+  const [attachedImage, setAttachedImage] = useState<File | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   // Derived unread count and display status
   const unreadCount = notifications.filter((n) => !n.dismissed).length;
@@ -786,7 +788,11 @@ export default function ChatPage() {
 
   // ── Send message ──────────────────────────────────────────────────────
   const handleSend = async (text?: string) => {
-    const msg = (text ?? inputText).trim();
+    const rawMsg = (text ?? inputText).trim();
+    const imageLabel = attachedImage
+      ? `[Image attached: ${attachedImage.name}] `
+      : "";
+    const msg = imageLabel + rawMsg;
     if (!msg || sendMessage.isPending) return;
 
     const userMsg: LocalMessage = {
@@ -1584,14 +1590,11 @@ export default function ChatPage() {
           <Avatar3DSidebar status={status} />
         </div>
         {/* ── Chat Column ───────────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col overflow-hidden min-w-0 relative">
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0 min-h-0 relative">
           <ChatWallpaperOverlay config={chatWallpaper} />
-          {/* Messages ScrollArea */}
-          <ScrollArea
-            className="flex-1"
-            ref={scrollRef as React.RefObject<HTMLDivElement>}
-          >
-            <div className="p-4 space-y-3 min-h-full max-w-4xl mx-auto">
+          {/* Messages scroll container */}
+          <div className="flex-1 overflow-y-auto min-h-0" ref={scrollRef}>
+            <div className="p-4 space-y-3 max-w-4xl mx-auto">
               {historyLoading ? (
                 <div className="space-y-3" data-ocid="chat.loading_state">
                   {[1, 2, 3].map((i) => (
@@ -1869,7 +1872,7 @@ export default function ChatPage() {
                 </>
               )}
             </div>
-          </ScrollArea>
+          </div>
 
           {/* Jump to latest floating button */}
           <AnimatePresence>
@@ -2019,6 +2022,21 @@ export default function ChatPage() {
                 )}
               </div>
 
+              {/* Attached image badge */}
+              {attachedImage && (
+                <div className="flex items-center gap-1 px-2 py-0.5 rounded-sm bg-primary/10 border border-primary/30 text-primary font-mono text-[10px] flex-shrink-0 max-w-[160px]">
+                  <ImagePlus className="w-3 h-3 flex-shrink-0" />
+                  <span className="truncate">{attachedImage.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setAttachedImage(null)}
+                    className="ml-0.5 opacity-60 hover:opacity-100"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </div>
+              )}
+
               {/* Voice button */}
               <Button
                 type="button"
@@ -2037,6 +2055,36 @@ export default function ChatPage() {
                 ) : (
                   <Mic className="w-4 h-4" />
                 )}
+              </Button>
+
+              {/* Hidden image file input */}
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] ?? null;
+                  setAttachedImage(file);
+                  e.target.value = "";
+                }}
+              />
+
+              {/* Image upload button */}
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => imageInputRef.current?.click()}
+                className={`h-9 w-9 p-0 rounded-sm flex-shrink-0 transition-all ${
+                  attachedImage
+                    ? "text-primary border border-primary/40"
+                    : "text-muted-foreground hover:text-primary hover:border-primary/40"
+                }`}
+                data-ocid="chat.image_upload_button"
+                title={attachedImage ? attachedImage.name : "Attach image"}
+              >
+                <ImagePlus className="w-4 h-4" />
               </Button>
 
               {/* Send button */}

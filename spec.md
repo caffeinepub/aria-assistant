@@ -1,35 +1,30 @@
-# Melina — Phase 7C
+# Melina - Continuous Conversation Engine
 
 ## Current State
-Melina uses `melina-engine.ts` (Phase 7B) for all response generation. The engine has solid intent detection, contextual awareness, and tone adaptation. Responses are functional and contextual but lack:
-- Topic-level semantic awareness (tech, lifestyle, philosophy, emotions, etc.)
-- Session memory callbacks (e.g., referencing something said earlier in the same chat)
-- Natural filler phrases that feel organic and personality-driven
-- Sentence structure variety within the same intent bucket
+- `melina-engine.ts` generates responses with a context window of only the last 5 user messages
+- Responses do not consistently end with a follow-up question or open invitation
+- Farewell responses fully close the conversation
+- ChatPage.tsx has a textarea input that should already be persistent; infinite messages already implemented via windowed rendering
 
 ## Requested Changes (Diff)
 
 ### Add
-- `detectTopic()` function: classifies message into semantic topic clusters (tech, lifestyle, philosophy, work, creative, emotional, random)
-- `buildFillerPrefix()` function: returns personality-driven filler starters ("Honestly...", "Look...", "Okay, real talk —", "As if I didn't see that coming —")
-- `buildSessionMemoryReference()` function: scans session chat history for a prior user message and naturally weaves a callback into the response
-- Expanded response pools per intent with longer, more varied sentence structures
-- Topic-aware response branching inside `buildContextualResponse()` and `buildFactualResponse()`
+- Every Melina response must end with a contextual follow-up question or open invitation (not generic sign-off)
+- Deep context window: reference up to 20 prior user messages when generating responses
+- `buildSessionMemoryCallback` should scan up to 20 messages back for callbacks, not just the last few
 
 ### Modify
-- `buildContextualResponse()`: inject topic-aware branches + session callbacks + filler prefixes
-- `buildGreetingResponse()`: reference what user talked about last time in same session
-- `buildPersonalQuestionResponse()`: add memory of session topic context
-- `buildFactualResponse()`: expand knowledge base and add topic-aware follow-up prompts
-- `generateMelinaResponse()`: pass topic detection result into relevant builders
+- `extractContext` in `melina-engine.ts`: increase `lastUserMessages` slice from -5 to -20
+- `buildFarewellResponse`: respect user intent to end (graceful goodbye), but leave door open subtly without forcing continuation
+- `buildContextualResponse` and all response builders: append a follow-up question or open invitation at the end of every response
+- Ensure chat textarea input in ChatPage is always rendered and never conditionally hidden based on message count
 
 ### Remove
 - Nothing removed
 
 ## Implementation Plan
-1. Add `detectTopic()` semantic classifier
-2. Add `buildFillerPrefix()` with Melina personality tone
-3. Add `buildSessionMemoryReference()` for mid-session callbacks
-4. Expand response pools (at least 2-3 new variants per major intent)
-5. Wire topic + filler + session memory into contextual and general responses
-6. Validate frontend build
+1. In `melina-engine.ts`, update `extractContext` to use `.slice(-20)` for `lastUserMessages`
+2. Add a `appendFollowUp(response, topic, name)` helper that appends a contextual follow-up to any response string
+3. Apply `appendFollowUp` at the end of `generateMelinaResponse` before returning (excluding farewell intent)
+4. Update farewell responses to be warm and leave door open ("I'll be here whenever you're ready")
+5. In `ChatPage.tsx`, confirm textarea input is unconditionally rendered with no message-count gate
