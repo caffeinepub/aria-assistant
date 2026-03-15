@@ -173,7 +173,7 @@ export default function DashboardPanel() {
       >
         <div className="w-5 h-5 rounded-full overflow-hidden border border-primary/30 flex-shrink-0 mt-0.5">
           <img
-            src="/assets/generated/melina-avatar.dim_600x800.png"
+            src="/assets/generated/melina-avatar.dim_400x500.png"
             alt="Melina"
             className="w-full h-full object-cover object-top"
           />

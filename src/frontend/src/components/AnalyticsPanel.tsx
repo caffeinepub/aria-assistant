@@ -138,7 +138,7 @@ export default function AnalyticsPanel() {
       >
         <div className="w-12 h-12 rounded-full overflow-hidden border border-primary/20 opacity-50">
           <img
-            src="/assets/generated/melina-avatar.dim_600x800.png"
+            src="/assets/generated/melina-avatar.dim_400x500.png"
             alt="Melina"
             className="w-full h-full object-cover object-top"
           />

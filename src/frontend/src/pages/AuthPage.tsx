@@ -85,7 +85,7 @@ export default function AuthPage() {
                 />
               </div>
               <img
-                src="/assets/generated/melina-avatar.dim_600x800.png"
+                src="/assets/generated/melina-avatar.dim_400x500.png"
                 alt="Melina AI Avatar"
                 className="w-full object-cover avatar-glow"
                 style={{ aspectRatio: "3/4" }}
@@ -140,7 +140,7 @@ export default function AuthPage() {
             <div className="flex lg:hidden justify-center mb-4">
               <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-primary/40 avatar-glow">
                 <img
-                  src="/assets/generated/melina-avatar.dim_600x800.png"
+                  src="/assets/generated/melina-avatar.dim_400x500.png"
                   alt="Melina"
                   className="w-full h-full object-cover object-top"
                 />

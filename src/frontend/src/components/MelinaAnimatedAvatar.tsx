@@ -15,7 +15,7 @@ interface MelinaAnimatedAvatarProps {
   style?: React.CSSProperties;
 }
 
-const AVATAR_SRC = "/assets/generated/melina-avatar.dim_600x800.png";
+const AVATAR_SRC = "/assets/generated/melina-avatar.dim_400x500.png";
 
 // Size map: controls object-position for small sizes
 const SIZE_OBJECT_POSITION: Record<AvatarSize, string> = {
